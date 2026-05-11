@@ -6,7 +6,12 @@ Reader must enqueue all new UIDs oldest-first and never wait for agent completio
 
 ## Agent dispatch timeout
 
-Mark the job as `blocked`, store stderr/stdout summary, release the `work_key` lock.
+OpenClaw agent execution uses explicit per-intent timeouts:
+
+- `review_only`: default 900 seconds.
+- `work_allowed`: default 3600 seconds.
+
+The bridge waits for the OpenClaw CLI with a small grace window after that agent timeout. If the CLI still has not returned, mark the job as `blocked`, store stderr/stdout summary, and release the `work_key` lock. This does not block IMAP reading or unrelated PRs/issues because dispatch happens in the executor pool, not the reader.
 
 ## Duplicate notifications for same PR/issue
 

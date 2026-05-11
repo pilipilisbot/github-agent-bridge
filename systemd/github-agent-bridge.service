@@ -1,10 +1,31 @@
 [Unit]
-Description=GitHub Agent Bridge
-After=network-online.target
+Description=GitHub Agent Bridge executor
+After=network-online.target openclaw-gateway.service
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/github-agent-bridge
+Environment=GITHUB_AGENT_BRIDGE_MODE=shadow
+Environment=GITHUB_AGENT_BRIDGE_WORKERS=4
+Environment=GITHUB_AGENT_BRIDGE_REVIEW_TIMEOUT=900
+Environment=GITHUB_AGENT_BRIDGE_WORK_TIMEOUT=3600
+Environment=GITHUB_AGENT_BRIDGE_OPENCLAW_BIN=%h/.nvm/versions/node/v24.14.0/bin/openclaw
+Environment=GITHUB_AGENT_BRIDGE_NODE_BIN=%h/.nvm/versions/node/v24.14.0/bin/node
+Environment=GITHUB_AGENT_BRIDGE_DEFAULT_CHANNEL=telegram
+Environment=GITHUB_AGENT_BRIDGE_DEFAULT_TO=43532269
+EnvironmentFile=-%h/.config/github-agent-bridge/env
+ExecStart=%h/.local/bin/github-agent-bridge \
+  --db %h/.local/state/github-agent-bridge/bridge.sqlite3 \
+  --policy %h/.config/github-agent-bridge/policy.json \
+  run \
+  --mode ${GITHUB_AGENT_BRIDGE_MODE} \
+  --workers ${GITHUB_AGENT_BRIDGE_WORKERS} \
+  --review-timeout ${GITHUB_AGENT_BRIDGE_REVIEW_TIMEOUT} \
+  --work-timeout ${GITHUB_AGENT_BRIDGE_WORK_TIMEOUT} \
+  --openclaw-bin ${GITHUB_AGENT_BRIDGE_OPENCLAW_BIN} \
+  --node-bin ${GITHUB_AGENT_BRIDGE_NODE_BIN} \
+  --channel ${GITHUB_AGENT_BRIDGE_DEFAULT_CHANNEL} \
+  --to ${GITHUB_AGENT_BRIDGE_DEFAULT_TO}
 Restart=on-failure
 RestartSec=10
 

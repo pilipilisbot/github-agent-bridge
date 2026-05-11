@@ -58,13 +58,34 @@ class GitHubClient:
 
 
 class OpenClawDispatcher:
-    def __init__(self, openclaw_bin: str = "openclaw", node_bin: str | None = None, default_channel: str = "telegram", default_to: str = "43532269", timeout_seconds: int = 240, mode: RunMode = RunMode.LIVE):
+    def __init__(
+        self,
+        openclaw_bin: str = "openclaw",
+        node_bin: str | None = None,
+        default_channel: str = "telegram",
+        default_to: str = "43532269",
+        timeout_seconds: int = 3600,
+        mode: RunMode = RunMode.LIVE,
+        review_timeout_seconds: int = 900,
+        work_timeout_seconds: int = 3600,
+        cli_grace_seconds: int = 60,
+    ):
         self.openclaw_bin = openclaw_bin
         self.node_bin = node_bin
         self.default_channel = default_channel
         self.default_to = default_to
         self.timeout_seconds = timeout_seconds
+        self.review_timeout_seconds = review_timeout_seconds
+        self.work_timeout_seconds = work_timeout_seconds
+        self.cli_grace_seconds = cli_grace_seconds
         self.mode = mode
+
+    def timeout_for(self, job: Job) -> int:
+        if job.work_intent == "review_only":
+            return self.review_timeout_seconds
+        if job.work_intent == "work_allowed":
+            return self.work_timeout_seconds
+        return self.timeout_seconds
 
     def build_prompt(self, job: Job) -> str:
         intent_rules = REVIEW_ONLY_RULES if job.work_intent == "review_only" else ""
@@ -93,7 +114,8 @@ class OpenClawDispatcher:
         cmd = [self.openclaw_bin, "agent"]
         if agent:
             cmd += ["--agent", agent]
-        cmd += ["--channel", channel, "--to", to, "--deliver", "--message", self.build_prompt(job)]
+        agent_timeout = self.timeout_for(job)
+        cmd += ["--channel", channel, "--to", to, "--deliver", "--timeout", str(agent_timeout), "--message", self.build_prompt(job)]
         env = os.environ.copy()
         if self.node_bin:
             env["PATH"] = os.path.dirname(self.node_bin) + os.pathsep + env.get("PATH", "")
@@ -101,7 +123,9 @@ class OpenClawDispatcher:
             return DispatchResult(True, 0, "side effects skipped", "", False, reaction_ok, cmd)
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
         try:
-            out, err = proc.communicate(timeout=self.timeout_seconds)
+            # Let OpenClaw's own --timeout own the agent run deadline. The bridge only
+            # keeps a small grace window so it can capture the CLI result cleanly.
+            out, err = proc.communicate(timeout=agent_timeout + self.cli_grace_seconds)
             return DispatchResult(proc.returncode == 0, proc.returncode, (out or "")[:2000], (err or "")[:4000], False, reaction_ok, cmd)
         except subprocess.TimeoutExpired:
             try:

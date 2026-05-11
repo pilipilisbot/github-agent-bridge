@@ -1,0 +1,11 @@
+[Unit]
+Description=Run GitHub Agent Bridge IMAP reader every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=github-agent-bridge-reader.service
+
+[Install]
+WantedBy=timers.target

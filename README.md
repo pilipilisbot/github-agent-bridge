@@ -17,6 +17,7 @@ IMAP reader -> SQLite queue -> executor pool -> GitHub 👀 + OpenClaw agent dis
 - The same issue/PR cannot run concurrently (`work_key = owner/repo#number`).
 - Duplicate notifications for an active thread are coalesced.
 - Dispatch timeout/failure marks one job as `blocked` without blocking unrelated work.
+- OpenClaw agent runs get explicit timeouts: 900s for review-only jobs and 3600s for implementation work by default.
 
 
 ## Scope boundary
@@ -29,6 +30,8 @@ This project is GitHub-only. Generic email triage, calendar/status emails and pe
 github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 init-db
 github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 read-imap-once   --email "$EMAIL" --password "$APP_PASSWORD"
 github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 run --mode shadow --workers 4
+# live executor, explicit long-running GitHub work timeout profile
+github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 run --mode live --workers 4 --review-timeout 900 --work-timeout 3600
 github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 status
 ```
 
@@ -56,4 +59,4 @@ Use `replay`, `read-imap-once` without `--mark-seen`, and `run --mode shadow` be
 
 ## Current status
 
-This is an implementation scaffold with reusable components and tests. It does not yet replace the production legacy worker automatically.
+This is an implementation scaffold with reusable components and tests. It does not yet replace the production legacy worker automatically. Use the systemd units under `systemd/` for shadow/canary deployment.

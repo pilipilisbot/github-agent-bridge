@@ -87,7 +87,17 @@ def cmd_read_imap_once(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     q = JobQueue(args.db); policy = load_policy(args.policy)
     mode = RunMode(args.mode)
-    dispatcher = OpenClawDispatcher(args.openclaw_bin, args.node_bin, args.channel, args.to, args.timeout, mode=mode)
+    dispatcher = OpenClawDispatcher(
+        args.openclaw_bin,
+        args.node_bin,
+        args.channel,
+        args.to,
+        args.timeout,
+        mode=mode,
+        review_timeout_seconds=args.review_timeout,
+        work_timeout_seconds=args.work_timeout,
+        cli_grace_seconds=args.cli_grace,
+    )
     pool = ExecutorPool(q, policy, dispatcher, GitHubClient(args.gh_bin, mode=mode), ExecutorConfig(args.workers, args.idle_sleep, args.once))
     pool.run()
     return 0
@@ -139,7 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("run")
     s.add_argument("--mode", choices=[m.value for m in RunMode], default=RunMode.SHADOW.value)
     s.add_argument("--workers", type=int, default=4); s.add_argument("--once", action="store_true")
-    s.add_argument("--idle-sleep", type=float, default=1.0); s.add_argument("--timeout", type=int, default=240)
+    s.add_argument("--idle-sleep", type=float, default=1.0)
+    s.add_argument("--timeout", type=int, default=3600, help="fallback OpenClaw agent timeout in seconds")
+    s.add_argument("--review-timeout", type=int, default=900, help="OpenClaw agent timeout for review_only jobs")
+    s.add_argument("--work-timeout", type=int, default=3600, help="OpenClaw agent timeout for work_allowed jobs")
+    s.add_argument("--cli-grace", type=int, default=60, help="extra seconds the bridge waits for openclaw CLI cleanup after agent timeout")
     s.add_argument("--openclaw-bin", default=os.getenv("OPENCLAW_BIN", "openclaw")); s.add_argument("--node-bin", default=os.getenv("NODE_BIN"))
     s.add_argument("--gh-bin", default="gh"); s.add_argument("--channel", default="telegram"); s.add_argument("--to", default="43532269")
     s.set_defaults(func=cmd_run)
