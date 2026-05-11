@@ -15,6 +15,22 @@ Operational SLOs:
 - Review-only jobs should normally finish within 15 minutes (`--review-timeout 900`).
 - Implementation jobs may run for up to 60 minutes (`--work-timeout 3600`) before being marked blocked.
 
+Monitoring checks:
+
+```bash
+github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 monitor
+github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 monitor --json
+```
+
+The monitor exits `0` when healthy and `2` when it detects alerts. It checks:
+
+- executor service active;
+- reader timer active;
+- last reader service result;
+- blocked jobs;
+- pending jobs older than 300s;
+- running jobs older than the review/work thresholds.
+
 Suggested production split:
 
 ```bash

@@ -10,6 +10,7 @@ from pathlib import Path
 from .dispatch import GitHubClient, OpenClawDispatcher, RunMode
 from .executor import ExecutorConfig, ExecutorPool
 from .models import Notification
+from .monitor import MonitorThresholds, monitor, report_json
 from .parser import decode_header_value, extract_body_text, parse_auth_results
 from .policy import Policy
 from .queue import JobQueue
@@ -131,6 +132,24 @@ def cmd_unlock_stale(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_monitor(args: argparse.Namespace) -> int:
+    thresholds = MonitorThresholds(
+        pending_warn_seconds=args.pending_warn_seconds,
+        review_running_warn_seconds=args.review_running_warn_seconds,
+        work_running_warn_seconds=args.work_running_warn_seconds,
+    )
+    report = monitor(
+        args.db,
+        executor_unit=args.executor_unit,
+        reader_timer_unit=args.reader_timer_unit,
+        reader_service_unit=args.reader_service_unit,
+        thresholds=thresholds,
+        check_systemd=not args.no_systemd,
+    )
+    print(report_json(report) if args.json else report.text())
+    return 0 if report.ok else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="github-agent-bridge")
     p.add_argument("--db", default=DEFAULT_DB)
@@ -161,6 +180,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("jobs"); s.add_argument("--status"); s.add_argument("--limit", type=int, default=20); s.set_defaults(func=cmd_jobs)
     s = sub.add_parser("retry"); s.add_argument("job_id", type=int); s.set_defaults(func=cmd_retry)
     s = sub.add_parser("unlock-stale"); s.add_argument("--older-than", type=int, default=1800); s.set_defaults(func=cmd_unlock_stale)
+    s = sub.add_parser("monitor")
+    s.add_argument("--json", action="store_true", help="emit structured JSON")
+    s.add_argument("--no-systemd", action="store_true", help="skip systemd unit checks")
+    s.add_argument("--executor-unit", default="github-agent-bridge.service")
+    s.add_argument("--reader-timer-unit", default="github-agent-bridge-reader.timer")
+    s.add_argument("--reader-service-unit", default="github-agent-bridge-reader.service")
+    s.add_argument("--pending-warn-seconds", type=int, default=300)
+    s.add_argument("--review-running-warn-seconds", type=int, default=1200)
+    s.add_argument("--work-running-warn-seconds", type=int, default=4200)
+    s.set_defaults(func=cmd_monitor)
     return p
 
 

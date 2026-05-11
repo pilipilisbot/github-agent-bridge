@@ -33,6 +33,7 @@ github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 run -
 # live executor, explicit long-running GitHub work timeout profile
 github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 run --mode live --workers 4 --review-timeout 900 --work-timeout 3600
 github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 status
+github-agent-bridge --db ~/.local/state/github-agent-bridge/bridge.sqlite3 monitor
 ```
 
 ## Policy

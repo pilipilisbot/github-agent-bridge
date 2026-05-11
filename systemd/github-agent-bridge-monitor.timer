@@ -1,0 +1,11 @@
+[Unit]
+Description=Run GitHub Agent Bridge monitor every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Unit=github-agent-bridge-monitor.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=GitHub Agent Bridge monitor
+After=github-agent-bridge.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/github-agent-bridge/env
+ExecStart=%h/.local/bin/github-agent-bridge \
+  --db %h/.local/state/github-agent-bridge/bridge.sqlite3 \
+  --policy %h/.config/github-agent-bridge/policy.json \
+  monitor
