@@ -19,7 +19,7 @@ from .dispatch import GitHubClient, OpenClawDispatcher, RunMode
 from .executor import ExecutorConfig, ExecutorPool
 from .models import Notification, utc_now
 from .monitor import MonitorThresholds, monitor, report_json
-from .observability import DEFAULT_PROCESS_SAMPLE_RETENTION_SECONDS
+from .observability import DEFAULT_PROCESS_SAMPLE_RETENTION_SECONDS, configure_sentry
 from .parser import decode_header_value, extract_body_text, is_github_notification_message, parse_auth_results
 from .policy import Policy
 from .queue import JobQueue
@@ -438,7 +438,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    configure_sentry(service=_sentry_service(args))
     return args.func(args)
+
+
+def _sentry_service(args: argparse.Namespace) -> str:
+    command = getattr(getattr(args, "func", None), "__name__", "")
+    if command == "cmd_run":
+        return "executor"
+    if command == "cmd_read_imap_once":
+        return "reader"
+    if command == "cmd_monitor":
+        return "monitor"
+    if command.startswith("cmd_feedback"):
+        return "feedback"
+    if command == "cmd_update":
+        return "update"
+    return "cli"
 
 
 if __name__ == "__main__":

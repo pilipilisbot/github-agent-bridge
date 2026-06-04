@@ -36,7 +36,7 @@ from .dashboard_data import (
     transcript_entry_from_session_event,
 )
 from .monitor import monitor
-from .observability import list_alerts, recent_process_samples
+from .observability import configure_sentry, list_alerts, recent_process_samples
 from .queue import JobQueue
 from .systemd_status import allowed_unit_names, stream_journal_lines, systemd_status
 
@@ -287,6 +287,7 @@ def _is_admin(config: DashboardConfig, login: str, token: str | None = None) -> 
 
 
 def create_app(config: DashboardConfig | None = None) -> FastAPI:
+    configure_sentry(service="dashboard")
     config = config or DashboardConfig()
     app = FastAPI(title="GitHub Agent Bridge Dashboard API")
     app.state.dashboard_config = config

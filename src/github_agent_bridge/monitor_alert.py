@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .monitor import ALERT_RUNNING_NO_EXECUTOR_CHILD
+from .observability import configure_sentry
 
 
 @dataclass(frozen=True)
@@ -395,6 +396,7 @@ def send_alert(config: AlertConfig, output: str, unlock_output: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     del argv
+    configure_sentry(service="monitor-alert")
     config = AlertConfig.from_env()
     config.state_dir.mkdir(parents=True, exist_ok=True)
 
