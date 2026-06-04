@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.23.1 (2026-06-04)
+
+### Bug Fixes
+
+- Route feedback learner through policy agent
+  ([`77e978f`](https://github.com/pilipilisbot/github-agent-bridge/commit/77e978f375521850c7246c43bc1f50fdf4c0403e))
+
+
 ## v0.23.0 (2026-06-04)
 
 ### Documentation
