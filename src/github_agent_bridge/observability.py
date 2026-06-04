@@ -26,7 +26,7 @@ def configure_sentry(*, service: str, env: dict[str, str] | None = None) -> dict
     """Initialize Sentry when configured, without making sentry-sdk mandatory."""
     global _SENTRY_INITIALIZED, _SENTRY_LAST_RESULT
 
-    values = env or os.environ
+    values = os.environ if env is None else env
     dsn = _first_env(values, SENTRY_DSN_ENV, "SENTRY_DSN")
     if not dsn:
         return {"enabled": False, "reason": "missing_dsn"}

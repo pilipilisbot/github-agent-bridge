@@ -13,6 +13,7 @@ def reset_sentry_state(monkeypatch):
 
 def test_configure_sentry_noops_without_dsn(monkeypatch):
     reset_sentry_state(monkeypatch)
+    monkeypatch.setenv("GITHUB_AGENT_BRIDGE_SENTRY_DSN", "https://dsn.example/1")
 
     result = configure_sentry(service="executor", env={})
 
