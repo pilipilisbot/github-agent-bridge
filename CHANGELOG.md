@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.37.1 (2026-06-08)
+
+### Bug Fixes
+
+- Harden OpenClaw dispatch session recovery
+  ([`3924f2a`](https://github.com/pilipilisbot/github-agent-bridge/commit/3924f2aefb9ee309e3e3b6ea89f546ff7708e9b8))
+
+- Keep OpenClaw session keys stable
+  ([`313ee6f`](https://github.com/pilipilisbot/github-agent-bridge/commit/313ee6f8253565c77b3b304d779c83a9f00f7e57))
+
+
 ## v0.37.0 (2026-06-08)
 
 ### Features
