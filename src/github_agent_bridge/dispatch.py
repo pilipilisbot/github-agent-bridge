@@ -14,7 +14,12 @@ from typing import Callable
 from . import feedback
 from .models import GitHubContext, Job
 from .policy import DEFAULT_REPO_ROLE, Policy, Route
-from .session_correlation import normalize_session_id, session_id_for_job, session_key_for_work
+from .session_correlation import (
+    normalize_session_id,
+    session_id_for_job,
+    session_id_for_job_attempt,
+    session_key_for_work,
+)
 
 PROMPT_RULES_PACKAGE = "github_agent_bridge.prompt_rules"
 
@@ -513,8 +518,14 @@ class OpenClawDispatcher:
         if model_route.thinking:
             cmd += ["--thinking", model_route.thinking]
         agent_timeout = self.timeout_for(job)
-        session_id = normalize_session_id(str(job.metadata.get("openclaw_session_id") or session_id_for_job(job.id)))
-        session_key = session_key_for_work(job.work_key)
+        if job.work_intent == "work_allowed":
+            default_session_id = session_id_for_job_attempt(job.id, job.attempts)
+            session_key = session_key_for_work(job.work_key)
+            session_id = normalize_session_id(default_session_id)
+        else:
+            default_session_id = session_id_for_job(job.id)
+            session_key = session_key_for_work(job.work_key)
+            session_id = normalize_session_id(str(job.metadata.get("openclaw_session_id") or default_session_id))
         cmd += [
             "--session-id",
             session_id,

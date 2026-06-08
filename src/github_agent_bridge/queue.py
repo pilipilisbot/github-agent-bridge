@@ -8,7 +8,7 @@ from pathlib import Path
 from .models import GitHubContext, Job, Notification, utc_now
 from .parser import classify_github_action, classify_work_intent, extract_github_context
 from .policy import Policy
-from .session_correlation import session_id_for_job
+from .session_correlation import session_id_for_job, session_id_for_job_attempt
 from . import feedback
 from .actors import trigger_actor_details_for_enqueue
 
@@ -116,7 +116,10 @@ class JobQueue:
             if not row:
                 con.commit(); return None
             metadata = json.loads(row["metadata_json"] or "{}")
-            metadata.setdefault("openclaw_session_id", session_id_for_job(int(row["id"])))
+            if row["work_intent"] == "work_allowed":
+                metadata["openclaw_session_id"] = session_id_for_job_attempt(int(row["id"]), int(row["attempts"]) + 1)
+            else:
+                metadata.setdefault("openclaw_session_id", session_id_for_job(int(row["id"])))
             con.execute(
                 "UPDATE jobs SET status='running', locked_by=?, attempts=attempts+1, started_at=?, updated_at=?, metadata_json=? WHERE id=?",
                 (worker_id, now, now, json.dumps(metadata, sort_keys=True), row["id"]),

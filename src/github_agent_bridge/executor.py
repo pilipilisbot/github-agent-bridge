@@ -22,6 +22,15 @@ NO_FOLLOWUP_DUPLICATE_MARKERS = (
     "already has",
     "already reported",
     "no new information",
+    "no new repository state",
+    "no new state",
+    "prior cleanup note",
+    "repeat",
+)
+TRANSIENT_DISPATCH_ERROR_MARKERS = (
+    "cli transcript compaction failed",
+    "summarization failed: connection error",
+    "codex app-server client closed before turn completed",
 )
 
 
@@ -31,6 +40,7 @@ class ExecutorConfig:
     idle_sleep_seconds: float = 1.0
     run_once: bool = False
     missing_followup_retries: int = 1
+    transient_dispatch_retries: int = 2
 
 
 class ExecutorPool:
@@ -101,6 +111,15 @@ class ExecutorPool:
                 self.queue.finish(job.id, "done", summary, detail)
             else:
                 reason = "dispatch timeout" if result.timed_out else f"dispatch failed rc={result.returncode}"
+                followup_url = self.github.visible_followup_after_trigger(job.context)
+                if followup_url:
+                    summary = "agent produced visible GitHub follow-up before dispatch failure"
+                    detail = f"followup_url={followup_url}; {result.detail}"
+                    self.queue.finish(job.id, "done", summary, detail)
+                    return True
+                if self._dispatch_failure_is_retryable(result) and job.attempts <= self.config.transient_dispatch_retries:
+                    self.queue.requeue_running(job.id, "transient OpenClaw dispatch failure; auto-requeued", result.detail)
+                    return True
                 self.queue.finish(job.id, "blocked", reason, result.detail)
         except Exception as exc:
             self.queue.finish(job.id, "blocked", f"executor exception: {type(exc).__name__}", str(exc))
@@ -111,6 +130,12 @@ class ExecutorPool:
             return False
         output = f"{result.stdout}\n{result.stderr}".lower()
         return any(marker in output for marker in NO_FOLLOWUP_OK_MARKERS) and any(marker in output for marker in NO_FOLLOWUP_DUPLICATE_MARKERS)
+
+    def _dispatch_failure_is_retryable(self, result: DispatchResult) -> bool:
+        if result.timed_out:
+            return False
+        output = f"{result.stdout}\n{result.stderr}\n{result.detail}".lower()
+        return any(marker in output for marker in TRANSIENT_DISPATCH_ERROR_MARKERS)
 
     def react_eyes_for_job_contexts(self, job) -> bool:
         contexts = [job.context, *self.queue.coalesced_contexts(job.id)]
