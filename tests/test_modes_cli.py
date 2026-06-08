@@ -70,13 +70,13 @@ def test_shadow_dispatch_returns_command_without_running():
     assert "--session-id" in result.command
     assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-1-attempt-1"
     assert "--session-key" in result.command
-    assert result.command[result.command.index("--session-key") + 1] == "github-agent-bridge:job:1:attempt:1"
+    assert result.command[result.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
     assert result.command[result.command.index("--verbose") + 1] == "on"
     assert "--timeout" in result.command
     assert "3600" in result.command
 
 
-def test_work_allowed_dispatch_uses_fresh_session_key_per_job_attempt():
+def test_work_allowed_dispatch_uses_fresh_session_id_per_job_attempt_with_stable_session_key():
     dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
     policy = Policy(trusted_orgs={"gisce"})
     first = dispatcher.dispatch(make_job(), policy, reaction_ok=True)
@@ -89,9 +89,9 @@ def test_work_allowed_dispatch_uses_fresh_session_key_per_job_attempt():
     assert first.command[first.command.index("--session-id") + 1] == "github-agent-bridge-job-1-attempt-1"
     assert second.command[second.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-1"
     assert retry.command[retry.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
-    assert first.command[first.command.index("--session-key") + 1] == "github-agent-bridge:job:1:attempt:1"
-    assert second.command[second.command.index("--session-key") + 1] == "github-agent-bridge:job:2:attempt:1"
-    assert retry.command[retry.command.index("--session-key") + 1] == "github-agent-bridge:job:2:attempt:2"
+    assert first.command[first.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
+    assert first.command[first.command.index("--session-key") + 1] == second.command[second.command.index("--session-key") + 1]
+    assert second.command[second.command.index("--session-key") + 1] == retry.command[retry.command.index("--session-key") + 1]
 
 
 def test_work_allowed_dispatch_ignores_legacy_session_id_metadata():

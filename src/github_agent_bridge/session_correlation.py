@@ -22,11 +22,6 @@ def session_key_for_work(work_key: str) -> str:
     return f"{SESSION_KEY_PREFIX}:{normalize_session_id(work_key)}"
 
 
-def session_key_for_job_attempt(job_id: int, attempt: int) -> str:
-    safe_attempt = max(1, int(attempt or 1))
-    return f"{SESSION_KEY_PREFIX}:job:{job_id}:attempt:{safe_attempt}"
-
-
 def normalize_session_id(value: str) -> str:
     normalized = SESSION_ID_PATTERN.sub("-", value.strip())
     normalized = normalized.strip("-")
