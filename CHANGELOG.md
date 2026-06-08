@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.37.0 (2026-06-08)
+
+### Features
+
+- Lazy load dashboard jobs
+  ([`63cf6d4`](https://github.com/pilipilisbot/github-agent-bridge/commit/63cf6d4c7b82707ecded2ed209907493fae65e89))
+
+
 ## v0.36.0 (2026-06-06)
 
 ### Features
