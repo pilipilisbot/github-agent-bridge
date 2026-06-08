@@ -47,17 +47,20 @@ class FakeGitHub:
 
 
 class RecordingDispatcher:
-    def __init__(self, stdout: str = "ok", stderr: str = ""):
+    def __init__(self, stdout: str = "ok", stderr: str = "", ok: bool = True, returncode: int = 0, timed_out: bool = False):
         self.jobs = []
         self.stdout = stdout
         self.stderr = stderr
+        self.ok = ok
+        self.returncode = returncode
+        self.timed_out = timed_out
 
     def dispatch(self, job, policy, reaction_ok=None, activity_callback=None):
         self.jobs.append(job)
         if activity_callback:
             activity_callback("openclaw_stdout", "OpenClaw CLI output", "thinking about the change")
             activity_callback("openclaw_stderr", "OpenClaw CLI error output", "token=secret ghp_abcdefghijklmnopqrstuvwxyz")
-        return DispatchResult(True, 0, self.stdout, self.stderr, False, reaction_ok, ["openclaw"])
+        return DispatchResult(self.ok, self.returncode, self.stdout, self.stderr, self.timed_out, reaction_ok, ["openclaw"])
 
 
 def enqueue_pr_review(queue: JobQueue):
@@ -354,6 +357,90 @@ def test_sync_after_merge_noop_duplicate_followup_is_done(tmp_path):
     assert pool.work_one("worker-test") is True
 
     assert dispatcher.jobs[0].id == job.id
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "done"
+    assert stored.last_error is None
+
+
+def test_sync_after_merge_repeat_without_followup_is_done(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_sync_after_merge(queue)
+    dispatcher = RecordingDispatcher(
+        stdout=(
+            "No GitHub follow-up was appropriate because this was a repeat sync-after-merge "
+            "event with no new repository state; the prior cleanup note already covered it."
+        )
+    )
+    github = FakeGitHub(assigned=False, mentioned=False)
+    github.followup_url = None
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"pilipilisbot"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "done"
+    assert stored.last_error is None
+
+
+def test_transient_dispatch_failure_is_requeued(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_pr_comment(queue)
+    dispatcher = RecordingDispatcher(
+        stderr="GatewayClientRequestError: Error: CLI transcript compaction failed for openai/gpt-5.5: Summarization failed: Connection error.",
+        ok=False,
+        returncode=1,
+    )
+
+    github = FakeGitHub(assigned=True)
+    github.followup_url = None
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "pending"
+    assert stored.last_error is None
+    assert stored.attempts == 1
+
+
+def test_transient_dispatch_failure_blocks_after_retry_budget(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_pr_comment(queue)
+    dispatcher = RecordingDispatcher(
+        stderr="GatewayClientRequestError: Error: codex app-server client closed before turn completed",
+        ok=False,
+        returncode=1,
+    )
+    config = ExecutorConfig(run_once=True, transient_dispatch_retries=1)
+    github = FakeGitHub(assigned=True)
+    github.followup_url = None
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=config)
+    assert pool.work_one("worker-test") is True
+    assert pool.work_one("worker-test") is True
+
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert "codex app-server client closed" in stored.last_error
+
+
+def test_dispatch_failure_after_visible_followup_is_done(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_pr_comment(queue)
+    dispatcher = RecordingDispatcher(
+        stderr="GatewayClientRequestError: Error: CLI transcript compaction failed for openai/gpt-5.5: Summarization failed: Connection error.",
+        ok=False,
+        returncode=1,
+    )
+    github = FakeGitHub(assigned=True, answered_url="https://github.com/gisce/erp/issues/27315#issuecomment-2")
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
     stored = queue.get(job.id)
     assert stored is not None
     assert stored.status == "done"

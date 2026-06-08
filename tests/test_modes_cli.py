@@ -3,9 +3,9 @@ from github_agent_bridge.models import GitHubContext, Job
 from github_agent_bridge.policy import ModelRoute, ModelRoutes, Policy
 
 
-def make_job(work_intent="work_allowed"):
+def make_job(work_intent="work_allowed", job_id=1, attempts=1):
     ctx = GitHubContext(["https://github.com/gisce/erp/pull/1#discussion_r2"], "gisce/erp", 1, review_comment_id=2)
-    return Job(1, ctx.work_key, ctx.repo, ctx.issue_number, "running", "reply_comment", work_intent, "subject", "<x@github.com>", 1, ctx)
+    return Job(job_id, ctx.work_key, ctx.repo, ctx.issue_number, "running", "reply_comment", work_intent, "subject", "<x@github.com>", 1, ctx, attempts=attempts)
 
 
 def test_shadow_github_reaction_has_no_external_failure():
@@ -68,40 +68,55 @@ def test_shadow_dispatch_returns_command_without_running():
     assert "--model" not in result.command
     assert "--thinking" not in result.command
     assert "--session-id" in result.command
-    assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-1"
+    assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-1-attempt-1"
     assert "--session-key" in result.command
-    assert result.command[result.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
+    assert result.command[result.command.index("--session-key") + 1] == "github-agent-bridge:job:1:attempt:1"
     assert result.command[result.command.index("--verbose") + 1] == "on"
     assert "--timeout" in result.command
     assert "3600" in result.command
 
 
-def test_dispatch_session_key_is_stable_for_same_github_thread():
+def test_work_allowed_dispatch_uses_fresh_session_key_per_job_attempt():
     dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
     policy = Policy(trusted_orgs={"gisce"})
     first = dispatcher.dispatch(make_job(), policy, reaction_ok=True)
-    second = dispatcher.dispatch(
-        Job(
-            2,
-            make_job().work_key,
-            "gisce/erp",
-            1,
-            "running",
-            "reply_comment",
-            "work_allowed",
-            "subject",
-            "<y@github.com>",
-            2,
-            make_job().context,
-        ),
-        policy,
-        reaction_ok=True,
-    )
+    second = dispatcher.dispatch(make_job(job_id=2), policy, reaction_ok=True)
+    retry = dispatcher.dispatch(make_job(job_id=2, attempts=2), policy, reaction_ok=True)
+
+    assert first.command
+    assert second.command
+    assert retry.command
+    assert first.command[first.command.index("--session-id") + 1] == "github-agent-bridge-job-1-attempt-1"
+    assert second.command[second.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-1"
+    assert retry.command[retry.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
+    assert first.command[first.command.index("--session-key") + 1] == "github-agent-bridge:job:1:attempt:1"
+    assert second.command[second.command.index("--session-key") + 1] == "github-agent-bridge:job:2:attempt:1"
+    assert retry.command[retry.command.index("--session-key") + 1] == "github-agent-bridge:job:2:attempt:2"
+
+
+def test_work_allowed_dispatch_ignores_legacy_session_id_metadata():
+    dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
+    policy = Policy(trusted_orgs={"gisce"})
+    job = make_job(job_id=2, attempts=2)
+    job.metadata["openclaw_session_id"] = "github-agent-bridge-job-2"
+
+    result = dispatcher.dispatch(job, policy, reaction_ok=True)
+
+    assert result.command
+    assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
+
+
+def test_review_only_dispatch_session_key_remains_stable_for_same_github_thread():
+    dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
+    policy = Policy(trusted_orgs={"gisce"})
+    first = dispatcher.dispatch(make_job("review_only"), policy, reaction_ok=True)
+    second = dispatcher.dispatch(make_job("review_only", job_id=2), policy, reaction_ok=True)
 
     assert first.command
     assert second.command
     assert first.command[first.command.index("--session-id") + 1] == "github-agent-bridge-job-1"
     assert second.command[second.command.index("--session-id") + 1] == "github-agent-bridge-job-2"
+    assert first.command[first.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
     assert first.command[first.command.index("--session-key") + 1] == second.command[second.command.index("--session-key") + 1]
 
 
