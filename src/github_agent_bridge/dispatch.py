@@ -18,7 +18,6 @@ from .session_correlation import (
     normalize_session_id,
     session_id_for_job,
     session_id_for_job_attempt,
-    session_key_for_job_attempt,
     session_key_for_work,
 )
 
@@ -521,7 +520,7 @@ class OpenClawDispatcher:
         agent_timeout = self.timeout_for(job)
         if job.work_intent == "work_allowed":
             default_session_id = session_id_for_job_attempt(job.id, job.attempts)
-            session_key = session_key_for_job_attempt(job.id, job.attempts)
+            session_key = session_key_for_work(job.work_key)
             session_id = normalize_session_id(default_session_id)
         else:
             default_session_id = session_id_for_job(job.id)
