@@ -1533,6 +1533,7 @@ function GitHubLinkList({ urls, compact = false }: { urls: string[]; compact?: b
             compact ? "h-7 px-2 text-xs" : "min-h-7 px-2 py-1 text-xs",
           )}
           href={safeExternalUrl(url)}
+          aria-label={url}
           rel="noreferrer"
           target="_blank"
         >
@@ -2089,20 +2090,22 @@ function JobDetail({ job, session, sessionEvents, transcript, now, compact = fal
   const liveWait = queueWaitSeconds(job, now);
   return (
     <div className="grid min-w-0 gap-4">
-      <div className="grid gap-2">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-0 z-20 -mx-3 -mt-3 grid gap-2 border-b border-border bg-panel/95 px-3 py-2 shadow-sm backdrop-blur sm:-mx-4 sm:-mt-4 sm:px-4" aria-label="Sticky job header">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <StatusBadge status={job.status} />
-          <a className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-semibold text-foreground hover:bg-slate-50" href={shareHref}>
+          <a className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-white px-2 text-xs font-semibold text-foreground hover:bg-slate-50" href={shareHref}>
             <Link className="h-3.5 w-3.5" aria-hidden />
             Job #{job.id}
           </a>
           <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} framed />
+          <span className="min-w-0 break-words font-mono text-xs text-muted [overflow-wrap:anywhere]">{job.work_key}</span>
         </div>
-        <div className="min-w-0 break-words font-mono text-sm [overflow-wrap:anywhere]">{job.work_key}</div>
-        <p className="min-w-0 break-words text-sm text-muted [overflow-wrap:anywhere]">{job.subject}</p>
-        <div className="grid gap-1.5">
-          <h3 className="text-xs font-semibold text-muted">GitHub links</h3>
-          {job.github_urls.length > 0 ? <GitHubLinkList urls={job.github_urls} /> : <p className="text-xs text-muted">No links recorded.</p>}
+        <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(280px,auto)] lg:items-start">
+          <p className="min-w-0 break-words text-sm text-muted [overflow-wrap:anywhere]">{job.subject}</p>
+          <div className="grid min-w-0 gap-1">
+            <h3 className="text-xs font-semibold text-muted">GitHub links</h3>
+            {job.github_urls.length > 0 ? <GitHubLinkList urls={job.github_urls} compact /> : <p className="text-xs text-muted">No links recorded.</p>}
+          </div>
         </div>
       </div>
       <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-3")}>

@@ -174,6 +174,7 @@ describe("status badges", () => {
     );
 
     expect(screen.getByRole("link", { name: githubUrl })).toHaveAttribute("href", githubUrl);
+    expect(screen.getByLabelText("Sticky job header")).toHaveClass("sticky", "top-0", "z-20");
     const content = container.textContent ?? "";
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Queue wait"));
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Timeline"));
