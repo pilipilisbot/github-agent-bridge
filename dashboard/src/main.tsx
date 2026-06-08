@@ -2100,6 +2100,10 @@ function JobDetail({ job, session, sessionEvents, transcript, now, compact = fal
         </div>
         <div className="min-w-0 break-words font-mono text-sm [overflow-wrap:anywhere]">{job.work_key}</div>
         <p className="min-w-0 break-words text-sm text-muted [overflow-wrap:anywhere]">{job.subject}</p>
+        <div className="grid gap-1.5">
+          <h3 className="text-xs font-semibold text-muted">GitHub links</h3>
+          {job.github_urls.length > 0 ? <GitHubLinkList urls={job.github_urls} /> : <p className="text-xs text-muted">No links recorded.</p>}
+        </div>
       </div>
       <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-3")}>
         <MiniStat label="Queue wait" value={formatSeconds(liveWait)} />
@@ -2169,23 +2173,6 @@ function JobDetail({ job, session, sessionEvents, transcript, now, compact = fal
             <EmptyState text={job.status === "running" ? "Waiting for live transcript entries..." : "No OpenClaw transcript entries are available for this session."} />
           )}
         </div>
-      </div>
-      <div>
-        <h3 className="mb-2 text-sm font-semibold">GitHub links</h3>
-        <ul className="grid gap-2 text-sm">
-          {job.github_urls.length > 0 ? (
-            job.github_urls.map((url) => (
-              <li key={url}>
-                <a className="break-all text-primary hover:underline [overflow-wrap:anywhere]" href={safeExternalUrl(url)} rel="noreferrer" target="_blank">
-                  <ExternalLink className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden />
-                  {url}
-                </a>
-              </li>
-            ))
-          ) : (
-            <li className="text-muted">No links recorded.</li>
-          )}
-        </ul>
       </div>
     </div>
   );
@@ -2765,6 +2752,7 @@ export {
   ActorFilter,
   AutoupdateNotice,
   Filters,
+  JobDetail,
   JobsList,
   ProductMeta,
   SectionNav,

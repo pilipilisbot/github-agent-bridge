@@ -5,6 +5,7 @@ import {
   ActorFilter,
   AutoupdateNotice,
   Filters,
+  JobDetail,
   JobsList,
   KnowledgePage,
   KnowledgeProposals,
@@ -158,6 +159,24 @@ describe("status badges", () => {
     );
 
     expect(screen.getByRole("columnheader", { name: "Status" }).parentElement).toHaveClass("sticky", "top-0", "z-10");
+  });
+
+  it("shows GitHub links at the top of the job detail", () => {
+    const githubUrl = "https://github.com/pilipilisbot/github-agent-bridge/issues/114#issuecomment-4651153034";
+    const { container } = render(
+      <JobDetail
+        job={{ ...job, github_urls: [githubUrl], worklog: [] }}
+        session={undefined}
+        sessionEvents={[]}
+        transcript={[]}
+        now={Date.parse("2026-06-08T16:40:00Z")}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: githubUrl })).toHaveAttribute("href", githubUrl);
+    const content = container.textContent ?? "";
+    expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Queue wait"));
+    expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Timeline"));
   });
 
   it("loads the next jobs batch when the list sentinel enters view", async () => {
