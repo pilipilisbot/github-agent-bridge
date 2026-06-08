@@ -111,6 +111,31 @@ describe("dashboard routing and API query helpers", () => {
 });
 
 describe("status badges", () => {
+  const job = {
+    id: 58,
+    work_key: "pilipilisbot/github-agent-bridge#58",
+    repo: "pilipilisbot/github-agent-bridge",
+    thread: 58,
+    status: "pending",
+    action: "open_issue",
+    decision: "allowed",
+    intent: "work_allowed",
+    subject: "El dot del badge queda per sobre del header de la taula",
+    trigger_actor: "ecarreras",
+    trigger_actor_avatar_url: null,
+    attempts: 1,
+    coalesced_count: 1,
+    last_error: null,
+    locked_by: null,
+    created_at: "2026-05-31T19:11:06Z",
+    updated_at: "2026-05-31T19:11:06Z",
+    started_at: null,
+    finished_at: null,
+    queue_wait_seconds: null,
+    runtime_seconds: null,
+    github_urls: [],
+  };
+
   it("pulses pending and running jobs, but leaves waiting approval static", () => {
     const { rerender } = render(<StatusBadge status="pending" />);
     expect(screen.getByText("pending").querySelector("span")).toHaveClass("animate-live-pulse");
@@ -125,32 +150,7 @@ describe("status badges", () => {
   it("keeps the jobs table header above animated status dots while scrolling", () => {
     render(
       <JobsList
-        jobs={[
-          {
-            id: 58,
-            work_key: "pilipilisbot/github-agent-bridge#58",
-            repo: "pilipilisbot/github-agent-bridge",
-            thread: 58,
-            status: "pending",
-            action: "open_issue",
-            decision: "allowed",
-            intent: "work_allowed",
-            subject: "El dot del badge queda per sobre del header de la taula",
-            trigger_actor: "ecarreras",
-            trigger_actor_avatar_url: null,
-            attempts: 1,
-            coalesced_count: 1,
-            last_error: null,
-            locked_by: null,
-            created_at: "2026-05-31T19:11:06Z",
-            updated_at: "2026-05-31T19:11:06Z",
-            started_at: null,
-            finished_at: null,
-            queue_wait_seconds: null,
-            runtime_seconds: null,
-            github_urls: [],
-          },
-        ]}
+        jobs={[job]}
         loading={false}
         now={Date.parse("2026-05-31T19:12:00Z")}
         onViewJob={() => undefined}
@@ -158,6 +158,55 @@ describe("status badges", () => {
     );
 
     expect(screen.getByRole("columnheader", { name: "Status" }).parentElement).toHaveClass("sticky", "top-0", "z-10");
+  });
+
+  it("loads the next jobs batch when the list sentinel enters view", async () => {
+    const onLoadMore = vi.fn();
+    class ImmediateIntersectionObserver {
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(target: Element) {
+        this.callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", ImmediateIntersectionObserver);
+
+    render(
+      <JobsList
+        jobs={[job]}
+        loading={false}
+        hasMore
+        loadingMore={false}
+        onLoadMore={onLoadMore}
+        now={Date.parse("2026-05-31T19:12:00Z")}
+        onViewJob={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(onLoadMore).toHaveBeenCalledTimes(1));
+    vi.unstubAllGlobals();
+  });
+
+  it("does not request another jobs batch while one is already loading", () => {
+    const onLoadMore = vi.fn();
+    render(
+      <JobsList
+        jobs={[job]}
+        loading={false}
+        hasMore
+        loadingMore
+        onLoadMore={onLoadMore}
+        now={Date.parse("2026-05-31T19:12:00Z")}
+        onViewJob={() => undefined}
+      />,
+    );
+
+    expect(screen.getAllByText("Loading more jobs...").length).toBeGreaterThan(0);
+    expect(onLoadMore).not.toHaveBeenCalled();
   });
 
   it("lets admins retry recoverable jobs from the jobs list without opening the detail page", async () => {

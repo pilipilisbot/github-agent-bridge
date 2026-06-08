@@ -665,6 +665,7 @@ function App() {
   const queryClient = useQueryClient();
   const [filters, setFilters] = React.useState<JobFilters>(emptyJobFilters);
   const [jobLimit, setJobLimit] = React.useState(initialJobLimit);
+  const jobLoadPendingRef = React.useRef(false);
   const [knowledgeRepo, setKnowledgeRepo] = React.useState("");
   const [knowledgeStatus, setKnowledgeStatus] = React.useState("proposed");
   const [pathname, setPathname] = React.useState(() => window.location.pathname);
@@ -679,7 +680,12 @@ function App() {
   const me = useQuery({ queryKey: ["me"], queryFn: () => api<{ user: UserProfile }>("/api/me"), refetchInterval: false });
   const about = useQuery({ queryKey: ["about"], queryFn: () => api<About>("/api/about") });
   const actorOptions = useQuery({ queryKey: ["job-actors"], queryFn: () => api<{ actors: JobActor[] }>("/api/jobs/actors"), enabled: isDashboardRoute });
-  const jobs = useQuery({ queryKey: ["jobs", filters, jobLimit], queryFn: () => api<{ jobs: Job[] }>(buildJobQuery(filters, jobLimit)), enabled: isDashboardRoute });
+  const jobs = useQuery({
+    queryKey: ["jobs", filters, jobLimit],
+    queryFn: () => api<{ jobs: Job[] }>(buildJobQuery(filters, jobLimit)),
+    enabled: isDashboardRoute,
+    placeholderData: (previousData) => previousData,
+  });
   const processes = useQuery({ queryKey: ["processes"], queryFn: () => api<ProcessesResponse>("/api/processes"), enabled: isSystemRoute });
   const systemd = useQuery({ queryKey: ["systemd"], queryFn: () => api<SystemdResponse>("/api/systemd"), enabled: isSystemRoute });
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => api<{ alerts: AlertRecord[] }>("/api/alerts"), enabled: isSystemRoute });
@@ -777,6 +783,15 @@ function App() {
   const applyFilters = React.useCallback((nextFilters: JobFilters) => {
     setFilters(nextFilters);
     setJobLimit(initialJobLimit);
+    jobLoadPendingRef.current = false;
+  }, []);
+  React.useEffect(() => {
+    if (!jobs.isFetching) jobLoadPendingRef.current = false;
+  }, [jobs.isFetching]);
+  const loadMoreJobs = React.useCallback(() => {
+    if (jobLoadPendingRef.current) return;
+    jobLoadPendingRef.current = true;
+    setJobLimit((current) => current + jobLimitStep);
   }, []);
   const selectedJob = selectedJobId ? (detail.data?.job ?? null) : null;
   const hasLiveJob = jobRows.some((job) => job.status === "running" || job.status === "pending") || selectedJob?.status === "running" || selectedJob?.status === "pending" || Boolean(processes.data?.running_jobs.length);
@@ -861,14 +876,18 @@ function App() {
               <Panel title="Recent jobs" flushHeader>
                 <Filters filters={filters} actorOptions={actorOptions.data?.actors ?? []} onChange={applyFilters} />
                 {jobs.error ? <Banner tone="error" text={jobs.error.message} /> : null}
-                <JobsList jobs={jobRows} loading={jobs.isLoading} onViewJob={viewJob} now={now} user={me.data?.user} onRetry={retryJob} onDismiss={dismissJob} />
-                {jobRows.length >= jobLimit ? (
-                  <div className="mt-3 flex justify-center">
-                    <button className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-slate-50" type="button" onClick={() => setJobLimit((current) => current + jobLimitStep)}>
-                      Load more jobs
-                    </button>
-                  </div>
-                ) : null}
+                <JobsList
+                  jobs={jobRows}
+                  loading={jobs.isLoading}
+                  loadingMore={jobs.isFetching && !jobs.isLoading}
+                  hasMore={jobRows.length >= jobLimit}
+                  onLoadMore={loadMoreJobs}
+                  onViewJob={viewJob}
+                  now={now}
+                  user={me.data?.user}
+                  onRetry={retryJob}
+                  onDismiss={dismissJob}
+                />
               </Panel>
               <Panel title="Runtime usage" action={<RefreshButton onClick={() => metrics.refetch()} />}>
                 <RuntimeUsageChart usage={metrics.data?.metrics.runtime_usage} loading={metrics.isLoading} totalJobs={totalJobs(counts)} />
@@ -1757,6 +1776,9 @@ function Field({ label, children, className }: { label: string; children: React.
 function JobsList({
   jobs,
   loading,
+  loadingMore = false,
+  hasMore = false,
+  onLoadMore,
   onViewJob,
   now,
   user,
@@ -1765,6 +1787,9 @@ function JobsList({
 }: {
   jobs: Job[];
   loading: boolean;
+  loadingMore?: boolean;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
   onViewJob: (id: number) => void;
   now: number;
   user?: UserProfile;
@@ -1773,8 +1798,19 @@ function JobsList({
 }) {
   const [retryingJobId, setRetryingJobId] = React.useState<number | null>(null);
   const [dismissingJobId, setDismissingJobId] = React.useState<number | null>(null);
+  const loadMoreRequestedRef = React.useRef(false);
+  const wasLoadingMoreRef = React.useRef(loadingMore);
   const canRetryFromList = Boolean(user?.is_admin && onRetry);
   const canDismissFromList = Boolean(user?.is_admin && onDismiss);
+  React.useEffect(() => {
+    if (wasLoadingMoreRef.current && !loadingMore) loadMoreRequestedRef.current = false;
+    wasLoadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+  const requestMoreJobs = React.useCallback(() => {
+    if (loadMoreRequestedRef.current) return;
+    loadMoreRequestedRef.current = true;
+    onLoadMore?.();
+  }, [onLoadMore]);
   const retryJobFromList = React.useCallback(async (jobId: number) => {
     if (!onRetry) return;
     setRetryingJobId(jobId);
@@ -1813,6 +1849,7 @@ function JobsList({
             onDismiss={dismissJobFromList}
           />
         ))}
+        <JobsLoadSentinel hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
       </div>
       <div className="hidden max-h-[640px] overflow-auto rounded-md border border-border md:block">
         <table className="min-w-full border-collapse text-sm">
@@ -1866,8 +1903,33 @@ function JobsList({
             ))}
           </tbody>
         </table>
+        <JobsLoadSentinel hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
       </div>
     </>
+  );
+}
+
+function JobsLoadSentinel({ hasMore, loading, onLoadMore }: { hasMore: boolean; loading: boolean; onLoadMore?: () => void }) {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const node = ref.current;
+    if (!node || !hasMore || loading || !onLoadMore) return;
+    if (!("IntersectionObserver" in window)) {
+      onLoadMore();
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+    }, { rootMargin: "240px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loading, onLoadMore]);
+
+  if (!hasMore && !loading) return null;
+  return (
+    <div ref={ref} className="flex min-h-10 items-center justify-center px-3 py-2 text-xs font-medium text-muted" aria-live="polite">
+      {loading ? "Loading more jobs..." : "Scroll for more jobs"}
+    </div>
   );
 }
 
