@@ -105,6 +105,54 @@ def test_capture_feedback_deduplicates_events(tmp_path):
     assert feedback.list_rules(db, "repo:gisce/erp") == []
 
 
+def test_pending_events_retries_error_proposals(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(db, notification(), context(), "reply_comment", "auto_trusted", "review_only")
+    event = feedback.list_events(db, "repo:gisce/erp")[0]
+
+    feedback.store_proposal(
+        db,
+        {
+            "event_id": event["id"],
+            "is_feedback": False,
+            "scope": event["scope"],
+            "type": "error",
+            "rule": "",
+            "confidence": 0.0,
+            "reason": "classification failed",
+        },
+        auto_approve_confidence=0.8,
+        model="gpt-5.4-mini",
+        error="temporary classifier failure",
+    )
+
+    assert [e["id"] for e in feedback.pending_events(db)] == [event["id"]]
+
+
+def test_pending_events_skips_non_error_proposals(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(db, notification(), context(), "reply_comment", "auto_trusted", "review_only")
+    event = feedback.list_events(db, "repo:gisce/erp")[0]
+
+    feedback.store_proposal(
+        db,
+        {
+            "event_id": event["id"],
+            "is_feedback": False,
+            "scope": event["scope"],
+            "type": "domain_context",
+            "rule": "",
+            "confidence": 0.2,
+            "reason": "Only about this PR.",
+        },
+        auto_approve_confidence=0.8,
+    )
+
+    assert feedback.pending_events(db) == []
+
+
 def test_capture_feedback_ignores_non_actionable_decisions(tmp_path):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)
@@ -228,6 +276,34 @@ def test_knowledge_moderation_approves_rejects_and_deletes_rules(tmp_path):
     assert feedback.delete_rule(db, rules[0]["id"]) is True
     assert feedback.list_rules(db, "repo:gisce/erp", min_confidence=0) == []
     assert feedback.delete_rule(db, rules[0]["id"]) is False
+
+
+def test_approve_proposal_can_react_to_origin_comment(tmp_path, monkeypatch):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(db, notification(), context(), "reply_comment", "auto_trusted", "review_only")
+    event = feedback.list_events(db, "repo:gisce/erp")[0]
+    proposed = feedback.store_proposal(
+        db,
+        {
+            "event_id": event["id"],
+            "is_feedback": True,
+            "scope": "repo:gisce/erp",
+            "type": "style_preference",
+            "rule": "Prefer compact feedback in GitHub follow-ups.",
+            "confidence": 0.7,
+            "reason": "Useful recurring style correction.",
+        },
+        auto_approve_confidence=0.9,
+    )
+    reacted = []
+    monkeypatch.setattr(feedback, "react_to_feedback_event", lambda *args, **kwargs: reacted.append((args, kwargs)) or True)
+
+    approved = feedback.approve_proposal(db, proposed["id"], react=True, gh_bin="gh-test")
+
+    assert approved is not None
+    assert approved["status"] == "approved"
+    assert reacted == [((db, event["id"]), {"gh_bin": "gh-test"})]
 
 
 def test_openclaw_json_payload_text_is_extracted():
@@ -380,7 +456,8 @@ def test_learn_from_events_passes_policy_route_agent(tmp_path, monkeypatch):
     feedback.learn_from_events(db, policy=policy, limit=5, auto_approve_confidence=0.8)
 
     assert captured["agent"] == "gisce-developer"
-    assert captured["session_id"] == "github-agent-bridge-feedback-gisce-developer"
+    event = feedback.list_events(db, "repo:gisce/erp")[0]
+    assert captured["session_id"] == feedback.session_id_for_event("github-agent-bridge-feedback", "gisce-developer", event["id"])
 
 
 def test_learn_from_events_falls_back_when_model_override_is_not_allowed(tmp_path, monkeypatch):

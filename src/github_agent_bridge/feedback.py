@@ -123,7 +123,13 @@ def capture_feedback(
 
 
 def pending_events(db_path: str | Path, scope: str = "", limit: int = 10) -> list[dict[str, Any]]:
-    clauses = ["NOT EXISTS (SELECT 1 FROM feedback_rule_proposals p WHERE p.event_id=feedback_events.id)"]
+    clauses = [
+        """NOT EXISTS (
+            SELECT 1 FROM feedback_rule_proposals p
+            WHERE p.event_id=feedback_events.id
+            AND p.status != 'error'
+        )"""
+    ]
     args: list[Any] = []
     if scope:
         clauses.append("(scope=? OR scope LIKE ?)")
@@ -243,6 +249,12 @@ def session_id_for_agent(base_session_id: str, agent: str | None) -> str:
     return f"{base_session_id}-{suffix}" if suffix else base_session_id
 
 
+def session_id_for_event(base_session_id: str, agent: str | None, event_id: str) -> str:
+    agent_session_id = session_id_for_agent(base_session_id, agent)
+    event_suffix = short_hash(event_id)
+    return f"{agent_session_id}-{event_suffix}"
+
+
 def classify_event_with_llm(
     event: dict[str, Any],
     openclaw_bin: str = "openclaw",
@@ -352,7 +364,7 @@ def store_proposal(
     return next(item for item in list_proposals(db_path, status="", limit=100) if item["id"] == pid)
 
 
-def approve_proposal(db_path: str | Path, proposal_id: str) -> dict[str, Any] | None:
+def approve_proposal(db_path: str | Path, proposal_id: str, *, react: bool = False, gh_bin: str = "gh") -> dict[str, Any] | None:
     now = utc_now()
     with _connect(db_path) as con:
         row = con.execute("SELECT * FROM feedback_rule_proposals WHERE id=?", (proposal_id,)).fetchone()
@@ -360,6 +372,8 @@ def approve_proposal(db_path: str | Path, proposal_id: str) -> dict[str, Any] | 
             return None
         con.execute("UPDATE feedback_rule_proposals SET status='approved', updated_at=?, error=NULL WHERE id=?", (now, proposal_id))
     add_rule(db_path, row["scope"], row["type"], row["rule"], float(row["confidence"]), [row["event_id"], proposal_id])
+    if react:
+        react_to_feedback_event(db_path, row["event_id"], gh_bin=gh_bin)
     return get_proposal(db_path, proposal_id)
 
 
@@ -425,6 +439,15 @@ def react_to_feedback_comment(event: dict[str, Any], gh_bin: str = "gh") -> bool
     return result.returncode == 0
 
 
+def react_to_feedback_event(db_path: str | Path, event_id: str, gh_bin: str = "gh") -> bool:
+    with _connect(db_path) as con:
+        row = con.execute("SELECT * FROM feedback_events WHERE id=?", (event_id,)).fetchone()
+        if not row:
+            return False
+        event = _enrich_event(con, _event_dict(row))
+    return react_to_feedback_comment(event, gh_bin=gh_bin)
+
+
 def learn_from_events(
     db_path: str | Path,
     openclaw_bin: str = "openclaw",
@@ -444,7 +467,7 @@ def learn_from_events(
     for event in events:
         try:
             agent = route_agent_for_event(event, policy)
-            event_session_id = session_id_for_agent(session_id, agent)
+            event_session_id = session_id_for_event(session_id, agent, event["id"])
             model_used = model
             try:
                 proposal = classify_event_with_llm(
