@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v0.37.2 (2026-06-09)
+
+### Bug Fixes
+
+- Make job detail header sticky
+  ([`252220a`](https://github.com/pilipilisbot/github-agent-bridge/commit/252220a2fa01c4116ac47701eebc321bd06ee5a7))
+
+- Make mobile job loading explicit
+  ([`21cec7e`](https://github.com/pilipilisbot/github-agent-bridge/commit/21cec7e3a689f473a29c787a1746095495c1a9d2))
+
+- Move job detail github links to top
+  ([`7a17156`](https://github.com/pilipilisbot/github-agent-bridge/commit/7a171563b96b19083a79fadd5574fa2004acce94))
+
+- Retry failed feedback classifications
+  ([`6e78168`](https://github.com/pilipilisbot/github-agent-bridge/commit/6e781684935ec32b118d643f683c61e6641d7ddc))
+
+
 ## v0.37.1 (2026-06-08)
 
 ### Bug Fixes
