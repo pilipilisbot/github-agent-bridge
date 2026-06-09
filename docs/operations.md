@@ -13,6 +13,7 @@ This guide is for running and monitoring the bridge.
 | Environment | `systemd/env.example` copied to a private env file |
 | Units | `systemd/*.service`, `systemd/*.timer` |
 | Reader wrapper | packaged `github-agent-bridge-reader-run` console script |
+| Autoupdate wrapper | packaged `github-agent-bridge-autoupdate-run` console script |
 
 ## Production commands
 
@@ -206,6 +207,15 @@ installing the package again. It exits without touching services while
 it runs the deferred systemd actions and clears the pending reload marker.
 Migration-blocked updates still remain operator-controlled until the migration
 backup/rollback workflow exists.
+
+Install and enable `github-agent-bridge-autoupdate.timer` to retry that
+completion pass automatically. The timer only calls
+`update --complete-pending`; it does not check GitHub, install a package, or
+restart the executor while active jobs remain in the queue:
+
+```bash
+systemctl --user enable --now github-agent-bridge-autoupdate.timer
+```
 
 Running-job age is not treated as a failure signal by itself. The monitor uses
 the latest semantic heartbeat, visible OpenClaw output, and persisted

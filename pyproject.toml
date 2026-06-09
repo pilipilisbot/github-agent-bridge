@@ -17,6 +17,7 @@ github-agent-bridge = "github_agent_bridge.cli:main"
 github-agent-bridge-dashboard = "github_agent_bridge.backend:main"
 github-agent-bridge-reader-run = "github_agent_bridge.reader_run:main"
 github-agent-bridge-monitor-alert = "github_agent_bridge.monitor_alert:main"
+github-agent-bridge-autoupdate-run = "github_agent_bridge.autoupdate_run:main"
 
 [build-system]
 requires = ["hatchling"]

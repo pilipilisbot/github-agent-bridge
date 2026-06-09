@@ -41,6 +41,8 @@ DEFAULT_SYSTEMD_UNITS = {
     "reader": "github-agent-bridge-reader.timer",
     "monitor": "github-agent-bridge-monitor.timer",
     "feedback": "github-agent-bridge-feedback.timer",
+    "autoupdate_service": "github-agent-bridge-autoupdate.service",
+    "autoupdate_timer": "github-agent-bridge-autoupdate.timer",
 }
 
 
@@ -180,6 +182,8 @@ def plan_systemd_actions(decision: str, classification: dict[str, Any], *, units
                     ("reader", "github-agent-bridge-reader.timer"),
                     ("monitor", "github-agent-bridge-monitor.timer"),
                     ("feedback", "github-agent-bridge-feedback.timer"),
+                    ("autoupdate_service", "github-agent-bridge-autoupdate.service"),
+                    ("autoupdate_timer", "github-agent-bridge-autoupdate.timer"),
                 )
                 if path.endswith(filename)
             }

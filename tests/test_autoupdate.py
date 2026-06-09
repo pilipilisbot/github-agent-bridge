@@ -175,6 +175,22 @@ def test_systemd_unit_changes_require_daemon_reload(tmp_path, monkeypatch):
     assert "github-agent-bridge.service" in plan["service_plan"]["notes"][0]
 
 
+def test_autoupdate_systemd_unit_changes_are_named_in_notes(tmp_path, monkeypatch):
+    monkeypatch.setattr("github_agent_bridge.actors.github_actor_details_for_context", lambda ctx, *, gh_bin="gh": None)
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+
+    plan = plan_update(
+        db,
+        repo_dir=tmp_path,
+        installed_version="1.2.3",
+        runner=release_runner("v1.2.4", ["systemd/github-agent-bridge-autoupdate.service"]),
+    )
+
+    assert plan["service_plan"]["daemon_reload_required"] is True
+    assert "github-agent-bridge-autoupdate.service" in plan["service_plan"]["notes"][0]
+
+
 def test_systemd_plan_accepts_custom_unit_names():
     plan = plan_systemd_actions(
         "stage_full_reload",
