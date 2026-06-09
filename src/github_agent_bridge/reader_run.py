@@ -4,6 +4,7 @@ import os
 import sys
 
 from .cli import DEFAULT_DB, DEFAULT_POLICY, main as cli_main
+from .observability import configure_sentry
 from .reader import imap_mailbox_arg
 
 
@@ -18,6 +19,7 @@ def main() -> int:
     optional --mark-seen flag, which should be omitted completely in shadow
     deployments.
     """
+    configure_sentry(service="reader")
     missing = [name for name in ("GITHUB_AGENT_BRIDGE_EMAIL", "GITHUB_AGENT_BRIDGE_PASSWORD") if not env(name)]
     if missing:
         print(f"missing required environment variables: {', '.join(missing)}", file=sys.stderr)

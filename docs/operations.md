@@ -87,6 +87,31 @@ gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
 Use `--no-persist-observability` for ad hoc monitor runs that should not write
 observability records.
 
+## Sentry error reporting
+
+Sentry is optional and disabled by default. Install the extra in the same
+virtualenv used by the services:
+
+```bash
+python -m pip install 'github-agent-bridge[sentry]'
+```
+
+Then set the DSN in the private systemd environment file:
+
+```text
+GITHUB_AGENT_BRIDGE_SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
+GITHUB_AGENT_BRIDGE_SENTRY_ENVIRONMENT=production
+GITHUB_AGENT_BRIDGE_SENTRY_RELEASE=
+GITHUB_AGENT_BRIDGE_SENTRY_TRACES_SAMPLE_RATE=
+GITHUB_AGENT_BRIDGE_SENTRY_PROFILES_SAMPLE_RATE=
+```
+
+`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
+`SENTRY_TRACES_SAMPLE_RATE`, and `SENTRY_PROFILES_SAMPLE_RATE` are also
+honored for compatibility, but prefer the `GITHUB_AGENT_BRIDGE_*` names in this
+service's env file. If a DSN is set without `sentry-sdk` installed, the bridge
+continues running without external error reporting.
+
 ## Safe update planning
 
 Use `gab update` to inspect a published release and decide which reloads are
