@@ -526,6 +526,7 @@ describe("autoupdate notice", () => {
     },
     decision: "stage_defer_executor_reload",
     executor_reload_pending: true,
+    dashboard_applied_at: "2026-06-04T16:31:00Z",
     blocked_reason: "active_jobs_block_executor_reload",
     queue: { active_counts: { pending: 1 }, active_total: 1 },
     classification: { risk: "executor_or_queue", migration_files: [], risky_files: ["src/github_agent_bridge/queue.py"] },
@@ -576,6 +577,13 @@ describe("autoupdate notice", () => {
     );
 
     expect(screen.queryByRole("button", { name: /apply update/i })).not.toBeInTheDocument();
+  });
+
+  it("does not offer completion before the update has been applied", () => {
+    render(<AutoupdateNotice state={{ ...updateState, dashboard_applied_at: undefined }} isAdmin={true} onCompletePending={vi.fn()} />);
+
+    expect(screen.getByText("executor reload pending")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /complete reload/i })).not.toBeInTheDocument();
   });
 
   it("keeps full changelog markdown for rendering", () => {

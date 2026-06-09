@@ -76,6 +76,7 @@ type AutoupdateState = {
   };
   decision?: string;
   executor_reload_pending?: boolean;
+  dashboard_applied_at?: string;
   blocked_reason?: string;
   queue?: {
     active_counts?: Record<string, number>;
@@ -983,7 +984,7 @@ function AutoupdateNotice({
   const changelog = changelogMarkdown(state.target?.body);
   const migrationCount = state.classification?.migration_files?.length ?? 0;
   const riskyCount = state.classification?.risky_files?.length ?? 0;
-  const canComplete = Boolean(state.executor_reload_pending && onCompletePending);
+  const canComplete = Boolean(state.executor_reload_pending && state.dashboard_applied_at && onCompletePending);
   const canApply = Boolean(onApply && migrationCount === 0);
 
   return (

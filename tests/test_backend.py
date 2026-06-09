@@ -108,7 +108,7 @@ def test_dashboard_autoupdate_refresh_requires_admin_and_records_plan(tmp_path, 
         "installed_tag": "v0.27.0",
         "target": {"tag_name": "v0.28.0"},
         "decision": "stage_full_reload",
-        "executor_reload_pending": False,
+        "executor_reload_pending": True,
         "blocked_reason": "",
         "queue": {"active_counts": {}, "active_total": 0},
         "classification": {"risk": "executor_or_shared", "migration_files": [], "risky_files": [], "systemd_files": []},
@@ -125,7 +125,9 @@ def test_dashboard_autoupdate_refresh_requires_admin_and_records_plan(tmp_path, 
     assert forbidden.status_code == 403
     assert response.status_code == 200
     assert response.json()["state"]["target"]["tag_name"] == "v0.28.0"
-    assert JobQueue(db).get_state("autoupdate", "")
+    state = json.loads(JobQueue(db).get_state("autoupdate", ""))
+    assert state["executor_reload_pending"] is False
+    assert "dashboard_applied_at" not in state
 
 
 def test_dashboard_autoupdate_apply_runs_safe_plan_and_records_state(tmp_path, monkeypatch):
@@ -138,7 +140,7 @@ def test_dashboard_autoupdate_apply_runs_safe_plan_and_records_state(tmp_path, m
         "installed_tag": "v0.27.0",
         "target": {"tag_name": "v0.28.0"},
         "decision": "stage_full_reload",
-        "executor_reload_pending": False,
+        "executor_reload_pending": True,
         "blocked_reason": "",
         "queue": {"active_counts": {}, "active_total": 0},
         "classification": {"risk": "executor_or_shared", "migration_files": [], "risky_files": [], "systemd_files": []},
@@ -153,11 +155,71 @@ def test_dashboard_autoupdate_apply_runs_safe_plan_and_records_state(tmp_path, m
     assert response.status_code == 200
     assert response.json()["execution"]["applied"] is True
     assert response.json()["state"]["decision"] == "stage_full_reload"
+    assert response.json()["state"]["executor_reload_pending"] is True
+    assert response.json()["state"]["dashboard_applied_at"]
+
+
+def test_dashboard_autoupdate_apply_does_not_arm_completion_when_blocked(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    app = create_app(DashboardConfig(db=db, require_auth=False))
+    client = TestClient(app)
+    plan = {
+        "installed_version": "0.27.0",
+        "installed_tag": "v0.27.0",
+        "target": {"tag_name": "v0.28.0"},
+        "decision": "stage_defer_executor_reload",
+        "executor_reload_pending": True,
+        "blocked_reason": "active_jobs_block_executor_reload",
+        "queue": {"active_counts": {"running": 1}, "active_total": 1},
+        "classification": {"risk": "executor_or_shared", "migration_files": [], "risky_files": [], "systemd_files": []},
+        "service_plan": {"immediate": [], "deferred": []},
+        "warnings": [],
+    }
+    monkeypatch.setattr("github_agent_bridge.backend._dashboard_autoupdate_plan", lambda db: plan)
+    monkeypatch.setattr(
+        "github_agent_bridge.backend._dashboard_apply_autoupdate",
+        lambda plan: {"applied": False, "blocked": ["active_jobs_block_executor_reload"], "commands": []},
+    )
+
+    response = client.post("/api/autoupdate/apply")
+
+    assert response.status_code == 409
+    assert response.json()["state"]["executor_reload_pending"] is False
+    assert "dashboard_applied_at" not in response.json()["state"]
+
+
+def test_dashboard_autoupdate_complete_pending_requires_applied_state(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    q.set_state(
+        "autoupdate",
+        json.dumps(
+            {
+                "executor_reload_pending": True,
+                "target": {"tag_name": "v0.28.0"},
+                "classification": {"migration_files": []},
+                "service_plan": {"deferred": [{"command": "restart", "unit": "github-agent-bridge.service"}]},
+            }
+        ),
+    )
+    app = create_app(DashboardConfig(db=db, require_auth=False))
+    client = TestClient(app)
+    monkeypatch.setattr(
+        "github_agent_bridge.backend.complete_pending_reload",
+        lambda db, systemctl_bin="systemctl": {"completed": True, "blocked": [], "commands": []},
+    )
+
+    response = client.post("/api/autoupdate/complete-pending")
+
+    assert response.status_code == 409
+    assert response.json()["completion"]["blocked"] == ["autoupdate_not_applied"]
 
 
 def test_dashboard_autoupdate_complete_pending_reports_blockers(tmp_path, monkeypatch):
     db = tmp_path / "bridge.sqlite3"
-    JobQueue(db)
+    q = JobQueue(db)
+    q.set_state("autoupdate", json.dumps({"dashboard_applied_at": "2026-06-09T19:50:00Z", "executor_reload_pending": True}))
     app = create_app(DashboardConfig(db=db, require_auth=False))
     client = TestClient(app)
     monkeypatch.setattr(

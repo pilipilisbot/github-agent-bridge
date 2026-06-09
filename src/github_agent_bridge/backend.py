@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .autoupdate import apply_update_plan, complete_pending_reload, load_update_state, plan_update, record_update_plan
+from .autoupdate import apply_update_plan, complete_pending_reload, load_update_state, plan_update, record_update_plan, save_update_state
 from .cli import DEFAULT_DB
 from .feedback import approve_proposal, delete_rule, list_events, list_proposals, list_repositories, list_rules, reject_proposal
 from .dashboard_data import (
@@ -133,6 +133,17 @@ def _dashboard_apply_autoupdate(plan: dict[str, Any]) -> dict[str, Any]:
         install_command=shlex.split(install_command) if install_command else None,
         systemctl_bin=_env("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"),
     )
+
+
+def _record_dashboard_autoupdate_plan(db: str | Path, plan: dict[str, Any], *, applied: bool) -> dict[str, Any]:
+    state = record_update_plan(db, plan)
+    if applied:
+        state["dashboard_applied_at"] = state["updated_at"]
+    else:
+        state.pop("dashboard_applied_at", None)
+        state["executor_reload_pending"] = False
+    save_update_state(JobQueue(db), state)
+    return state
 
 
 def _redacted_headers() -> dict[str, str]:
@@ -430,14 +441,18 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.post("/api/autoupdate/refresh")
     def api_autoupdate_refresh(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
         plan = _dashboard_autoupdate_plan(config.db)
-        state = record_update_plan(config.db, plan)
+        state = _record_dashboard_autoupdate_plan(config.db, plan, applied=False)
         return {"plan": plan, "state": state}
 
     @app.post("/api/autoupdate/apply")
     def api_autoupdate_apply(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
         plan = _dashboard_autoupdate_plan(config.db)
         execution = _dashboard_apply_autoupdate(plan)
-        state = record_update_plan(config.db, plan)
+        state = _record_dashboard_autoupdate_plan(
+            config.db,
+            plan,
+            applied=bool(execution.get("applied") and not execution.get("blocked")),
+        )
         payload = {"plan": plan, "execution": execution, "state": state}
         if execution.get("blocked") or not execution.get("applied"):
             return JSONResponse(payload, status_code=status.HTTP_409_CONFLICT)
@@ -445,6 +460,18 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
 
     @app.post("/api/autoupdate/complete-pending")
     def api_autoupdate_complete_pending(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        state = load_update_state(JobQueue(config.db))
+        if not state.get("dashboard_applied_at"):
+            payload = {
+                "completion": {
+                    "completed": False,
+                    "blocked": ["autoupdate_not_applied"],
+                    "commands": [],
+                    "state": state,
+                },
+                "state": state,
+            }
+            return JSONResponse(payload, status_code=status.HTTP_409_CONFLICT)
         completion = complete_pending_reload(
             config.db,
             systemctl_bin=_env("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"),
