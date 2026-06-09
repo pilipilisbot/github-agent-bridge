@@ -643,6 +643,7 @@ describe("knowledge proposals", () => {
               reason: "A reusable process correction.",
               model: "gpt-test",
               error: null,
+              source_event: null,
             },
           ],
           rules: [
@@ -755,6 +756,7 @@ describe("knowledge proposals", () => {
         reason: "A reusable process correction.",
         model: "gpt-test",
         error: null,
+        source_event: null,
       },
     ];
 
@@ -766,6 +768,51 @@ describe("knowledge proposals", () => {
 
     expect(onApprove).toHaveBeenCalledWith("feedback-proposal-1");
     expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("shows proposal source actor and links", () => {
+    const proposals = [
+      {
+        id: "feedback-proposal-1",
+        event_id: "event-1",
+        created_at: "2026-06-04T10:00:00Z",
+        updated_at: "2026-06-04T10:01:00Z",
+        status: "proposed",
+        scope: "repo:pilipilisbot/github-agent-bridge",
+        type: "operating_rule",
+        confidence: 0.72,
+        rule: "Keep knowledge moderation auditable.",
+        reason: "A reusable process correction.",
+        model: "gpt-test",
+        error: null,
+        source_event: {
+          id: "event-1",
+          occurred_at: "2026-06-04T10:00:00Z",
+          captured_at: "2026-06-04T10:01:00Z",
+          source: "github",
+          scope: "repo:pilipilisbot/github-agent-bridge",
+          actor: "copilot-pull-request-reviewer[bot]",
+          trigger_actor: "copilot-pull-request-reviewer[bot]",
+          trigger_actor_avatar_url: "",
+          github_urls: ["https://github.com/pilipilisbot/github-agent-bridge/pull/117#pullrequestreview-1"],
+          source_url: "https://github.com/pilipilisbot/github-agent-bridge/pull/117#pullrequestreview-1",
+          source_job_id: 510,
+          source_table: "job",
+          github_context: { urls: ["https://github.com/pilipilisbot/github-agent-bridge/pull/117#pullrequestreview-1"] },
+          comment: "Preserve backward compatibility.",
+          context: {},
+          classification: "technical_criterion",
+          confidence: 0.74,
+          memorable: false,
+        },
+      },
+    ];
+
+    render(<KnowledgeProposals proposals={proposals} loading={false} isAdmin={false} now={Date.parse("2026-06-04T10:02:00Z")} onApprove={vi.fn()} onReject={vi.fn()} />);
+
+    expect(screen.getByText("@copilot-pull-request-reviewer[bot]")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Job #510/i })).toHaveAttribute("href", "/jobs/510");
+    expect(screen.getByRole("link", { name: /github.com\/pilipilisbot\/github-agent-bridge/i })).toHaveAttribute("href", "https://github.com/pilipilisbot/github-agent-bridge/pull/117#pullrequestreview-1");
   });
 });
 

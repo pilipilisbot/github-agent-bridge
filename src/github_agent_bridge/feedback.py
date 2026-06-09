@@ -529,10 +529,15 @@ def list_proposals(db_path: str | Path, status: str = "", limit: int = 20) -> li
     sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
     args.append(limit)
     with _connect(db_path) as con:
-        return [_proposal_dict(row) for row in con.execute(sql, args)]
+        proposals = []
+        for row in con.execute(sql, args):
+            event_row = con.execute("SELECT * FROM feedback_events WHERE id=?", (row["event_id"],)).fetchone()
+            source_event = _enrich_event(con, _event_dict(event_row)) if event_row else None
+            proposals.append(_proposal_dict(row, source_event=source_event))
+        return proposals
 
 
-def _proposal_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _proposal_dict(row: sqlite3.Row, source_event: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "id": row["id"],
         "event_id": row["event_id"],
@@ -546,6 +551,7 @@ def _proposal_dict(row: sqlite3.Row) -> dict[str, Any]:
         "reason": row["reason"],
         "model": row["model"],
         "error": row["error"],
+        "source_event": source_event,
     }
 
 
