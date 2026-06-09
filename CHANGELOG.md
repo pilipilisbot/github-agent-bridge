@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.40.0 (2026-06-09)
+
+### Features
+
+- Complete pending autoupdate reloads
+  ([`734738b`](https://github.com/pilipilisbot/github-agent-bridge/commit/734738b11101cbb824f95d4358b9498bd02d9c8a))
+
+- Retry pending autoupdate reloads
+  ([`579e6a2`](https://github.com/pilipilisbot/github-agent-bridge/commit/579e6a2294e7ac8f28d08fa57f2a0f58acfdf86e))
+
+
 ## v0.39.0 (2026-06-09)
 
 ### Features
