@@ -23,7 +23,7 @@
   body {
     margin: 0;
     min-width: 320px;
-    overflow-x: hidden;
+    overflow-x: clip;
     font-family:
       ui-sans-serif,
       system-ui,
@@ -35,7 +35,7 @@
   }
 
   #root {
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 }
 
