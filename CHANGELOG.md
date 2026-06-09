@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.38.0 (2026-06-09)
+
+### Features
+
+- Show feedback proposal provenance
+  ([`96d34ea`](https://github.com/pilipilisbot/github-agent-bridge/commit/96d34ea72741fe4b255e19044ab237a95959f1e0))
+
+
 ## v0.37.2 (2026-06-09)
 
 ### Bug Fixes
