@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.39.0 (2026-06-09)
+
+### Features
+
+- Add optional sentry integration
+  ([`8ed6bf4`](https://github.com/pilipilisbot/github-agent-bridge/commit/8ed6bf402c407faeb323beffe6d8b79e8165ef83))
+
+### Testing
+
+- Isolate sentry env injection
+  ([`36faa18`](https://github.com/pilipilisbot/github-agent-bridge/commit/36faa1841fe3b4c7caaeb74050c5d8e1c64d61bf))
+
+
 ## v0.38.0 (2026-06-09)
 
 ### Features
