@@ -573,7 +573,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
 
     @app.post("/api/knowledge/proposals/{proposal_id}/approve")
     def api_knowledge_approve(proposal_id: str, _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
-        proposal = approve_proposal(config.db, proposal_id)
+        proposal = approve_proposal(config.db, proposal_id, react=True, gh_bin=os.getenv("GITHUB_AGENT_BRIDGE_GH_BIN", "gh"))
         if proposal is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_proposal_not_found")
         return {"proposal": proposal, "detail": "knowledge_proposal_approved"}

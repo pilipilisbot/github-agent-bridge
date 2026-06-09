@@ -113,6 +113,35 @@ def test_feedback_rule_add_cli_creates_rule(tmp_path, capsys):
     assert "Answer with concrete evidence." in captured.out
 
 
+def test_feedback_rule_add_cli_reacts_to_source_events(tmp_path, capsys, monkeypatch):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    reacted = []
+    monkeypatch.setattr(cli.feedback, "react_to_feedback_event", lambda *args, **kwargs: reacted.append((args, kwargs)) or True)
+
+    cli.main([
+        "--db",
+        str(db),
+        "feedback-rule-add",
+        "--scope",
+        "repo:gisce/erp",
+        "--type",
+        "style_preference",
+        "--rule",
+        "Answer with concrete evidence.",
+        "--confidence",
+        "0.8",
+        "--source-event",
+        "event-1",
+        "--gh-bin",
+        "gh-test",
+    ])
+
+    captured = capsys.readouterr()
+    assert '"reacted": 1' in captured.out
+    assert reacted == [((str(db), "event-1"), {"gh_bin": "gh-test"})]
+
+
 def test_feedback_events_cli_lists_events(tmp_path, capsys):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)

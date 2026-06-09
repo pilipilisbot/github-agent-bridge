@@ -286,7 +286,12 @@ def cmd_feedback_events(args: argparse.Namespace) -> int:
 
 def cmd_feedback_rule_add(args: argparse.Namespace) -> int:
     rule = feedback.add_rule(args.db, args.scope, args.type, args.rule, args.confidence, args.source_event)
-    print(json.dumps({"rule": rule}, ensure_ascii=False, indent=2))
+    reacted = 0
+    if not args.no_react:
+        for event_id in args.source_event:
+            if feedback.react_to_feedback_event(args.db, event_id, gh_bin=args.gh_bin):
+                reacted += 1
+    print(json.dumps({"rule": rule, "reacted": reacted}, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -411,6 +416,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--rule", required=True, help="curated rule text")
     s.add_argument("--confidence", type=float, default=0.8)
     s.add_argument("--source-event", action="append", default=[], help="feedback event id that supports this rule")
+    s.add_argument("--gh-bin", default=os.getenv("GITHUB_AGENT_BRIDGE_GH_BIN", "gh"))
+    s.add_argument("--no-react", action="store_true", help="do not add a heart reaction to source feedback comments")
     s.set_defaults(func=cmd_feedback_rule_add)
     s = sub.add_parser("feedback-learn", help="autonomously classify feedback candidates and promote high-confidence rules")
     s.add_argument("--limit", type=int, default=None)
