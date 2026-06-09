@@ -211,6 +211,37 @@ describe("status badges", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses an explicit load more action for the mobile jobs list", async () => {
+    const user = userEvent.setup();
+    const onLoadMore = vi.fn();
+    class IdleIntersectionObserver {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", IdleIntersectionObserver);
+
+    render(
+      <JobsList
+        jobs={[job]}
+        loading={false}
+        hasMore
+        loadingMore={false}
+        onLoadMore={onLoadMore}
+        now={Date.parse("2026-05-31T19:12:00Z")}
+        onViewJob={() => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Load more jobs" }));
+
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
   it("does not request another jobs batch while one is already loading", () => {
     const onLoadMore = vi.fn();
     render(

@@ -1850,7 +1850,7 @@ function JobsList({
             onDismiss={dismissJobFromList}
           />
         ))}
-        <JobsLoadSentinel hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
+        <MobileLoadMoreJobs hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
       </div>
       <div className="hidden max-h-[640px] overflow-auto rounded-md border border-border md:block">
         <table className="min-w-full border-collapse text-sm">
@@ -1907,6 +1907,21 @@ function JobsList({
         <JobsLoadSentinel hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
       </div>
     </>
+  );
+}
+
+function MobileLoadMoreJobs({ hasMore, loading, onLoadMore }: { hasMore: boolean; loading: boolean; onLoadMore?: () => void }) {
+  if (!hasMore && !loading) return null;
+  return (
+    <button
+      className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 md:hidden"
+      type="button"
+      disabled={loading || !hasMore}
+      onClick={() => onLoadMore?.()}
+    >
+      <ChevronDown className="h-4 w-4" aria-hidden />
+      {loading ? "Loading more jobs..." : "Load more jobs"}
+    </button>
   );
 }
 
