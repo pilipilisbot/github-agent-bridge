@@ -192,6 +192,21 @@ Python executable, or another package source. Use `--skip-install` or
 Those still need the follow-up migration workflow with DB backup, migration
 status tracking, rollback/degraded-state handling, and post-checks.
 
+When a previous `--record --apply` run left `executor_reload_pending=true`,
+rerun the recorded deferred actions after the active queue drains:
+
+```bash
+gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
+  update --complete-pending --json
+```
+
+This command reads the persisted autoupdate state instead of checking GitHub or
+installing the package again. It exits without touching services while
+`pending`, `running`, or `waiting_approval` jobs exist; once the queue is quiet
+it runs the deferred systemd actions and clears the pending reload marker.
+Migration-blocked updates still remain operator-controlled until the migration
+backup/rollback workflow exists.
+
 Running-job age is not treated as a failure signal by itself. The monitor uses
 the latest semantic heartbeat, visible OpenClaw output, and persisted
 CPU/I/O/PID-tree activity to decide whether an old running job looks stalled.

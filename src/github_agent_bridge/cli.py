@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import feedback
 from .actors import backfill_trigger_actors
-from .autoupdate import apply_update_plan, plan_update, record_update_plan
+from .autoupdate import apply_update_plan, complete_pending_reload, plan_update, record_update_plan
 from .dashboard_data import inspect_db_read_only, list_jobs
 from .dispatch import GitHubClient, OpenClawDispatcher, RunMode
 from .executor import ExecutorConfig, ExecutorPool
@@ -240,6 +240,14 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
+    if args.complete_pending:
+        completion = complete_pending_reload(
+            args.db,
+            systemctl_bin=args.systemctl_bin,
+        )
+        print(json.dumps({"completion": completion}, ensure_ascii=False, indent=2 if args.json else None))
+        return 0 if completion.get("completed") else 2
+
     plan = plan_update(
         args.db,
         repo=args.repo,
@@ -400,6 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--systemctl-bin", default=os.getenv("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"))
     s.add_argument("--skip-install", action="store_true", help="with --apply, run service actions without installing the target package")
     s.add_argument("--skip-systemd-actions", action="store_true", help="with --apply, install the package without running systemd actions")
+    s.add_argument("--complete-pending", action="store_true", help="run recorded deferred reload actions once the queue is quiet")
     s.add_argument("--json", action="store_true", help="pretty-print structured JSON")
     s.set_defaults(func=cmd_update)
     s = sub.add_parser("feedback-rules", help="list curated feedback rules")

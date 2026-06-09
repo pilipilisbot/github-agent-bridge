@@ -90,6 +90,32 @@ def test_update_cli_apply_runs_configured_install_command(tmp_path, capsys, monk
     assert calls[0]["install_command"] == ["python", "-m", "pip", "install", "pkg"]
 
 
+def test_update_cli_complete_pending_uses_recorded_state(tmp_path, capsys, monkeypatch):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    calls = []
+
+    def fake_complete(db_path, **kwargs):
+        calls.append((db_path, kwargs))
+        return {"completed": True, "blocked": [], "commands": [{"kind": "systemd"}]}
+
+    monkeypatch.setattr("github_agent_bridge.cli.complete_pending_reload", fake_complete)
+
+    assert cli.main([
+        "--db",
+        str(db),
+        "update",
+        "--complete-pending",
+        "--systemctl-bin",
+        "systemctl-test",
+        "--json",
+    ]) == 0
+
+    captured = capsys.readouterr()
+    assert '"completion": {' in captured.out
+    assert calls == [(str(db), {"systemctl_bin": "systemctl-test"})]
+
+
 def test_feedback_rule_add_cli_creates_rule(tmp_path, capsys):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)

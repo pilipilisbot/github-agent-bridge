@@ -6,6 +6,7 @@ from pathlib import Path
 
 from github_agent_bridge.autoupdate import (
     apply_update_plan,
+    complete_pending_reload,
     default_install_command,
     load_update_state,
     plan_systemd_actions,
@@ -268,3 +269,77 @@ def test_apply_update_plan_stops_before_services_when_install_fails():
 
     assert execution["applied"] is False
     assert calls == [["python", "-m", "pip", "install", "pkg"]]
+
+
+def test_complete_pending_reload_blocks_until_queue_is_quiet(tmp_path, monkeypatch):
+    monkeypatch.setattr("github_agent_bridge.actors.github_actor_details_for_context", lambda ctx, *, gh_bin="gh": None)
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    enqueue_job(q)
+    plan = plan_update(
+        db,
+        repo_dir=tmp_path,
+        installed_version="1.2.3",
+        runner=release_runner("v1.2.4", ["src/github_agent_bridge/executor.py"]),
+    )
+    record_update_plan(db, plan)
+
+    completion = complete_pending_reload(db, runner=lambda args, cwd: completed("should not run"))
+
+    assert completion["completed"] is False
+    assert completion["blocked"] == ["active_jobs_block_executor_reload"]
+    assert completion["commands"] == []
+    assert load_update_state(q)["executor_reload_pending"] is True
+    assert load_update_state(q)["queue"]["active_total"] == 1
+
+
+def test_complete_pending_reload_runs_deferred_actions_and_clears_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("github_agent_bridge.actors.github_actor_details_for_context", lambda ctx, *, gh_bin="gh": None)
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    job_id = enqueue_job(q)
+    plan = plan_update(
+        db,
+        repo_dir=tmp_path,
+        installed_version="1.2.3",
+        runner=release_runner("v1.2.4", ["src/github_agent_bridge/executor.py"]),
+    )
+    record_update_plan(db, plan)
+    q.finish(job_id, "done", "finished")
+    calls: list[list[str]] = []
+
+    completion = complete_pending_reload(
+        db,
+        systemctl_bin="systemctl-test",
+        runner=lambda args, cwd: calls.append(list(args)) or completed("ok"),
+    )
+
+    state = load_update_state(q)
+    assert completion["completed"] is True
+    assert completion["blocked"] == []
+    assert calls == [["systemctl-test", "--user", "restart", "github-agent-bridge.service"]]
+    assert state["executor_reload_pending"] is False
+    assert state["decision"] == "noop"
+    assert state["service_plan"]["deferred"] == []
+    assert state["completion"]["commands"][0]["unit"] == "github-agent-bridge.service"
+
+
+def test_complete_pending_reload_refuses_migration_state(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    q.set_state(
+        "autoupdate",
+        json.dumps(
+            {
+                "executor_reload_pending": True,
+                "classification": {"migration_files": ["src/github_agent_bridge/sql/schema.sql"]},
+                "service_plan": {"deferred": [{"command": "restart", "unit": "github-agent-bridge.service"}]},
+            }
+        ),
+    )
+
+    completion = complete_pending_reload(db, runner=lambda args, cwd: completed("should not run"))
+
+    assert completion["completed"] is False
+    assert completion["blocked"] == ["migration_completion_not_supported"]
+    assert completion["commands"] == []
