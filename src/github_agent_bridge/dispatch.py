@@ -305,21 +305,55 @@ class GitHubClient:
                 newest_url = comment.get("html_url") or f"{repo}#{issue}"
         return newest_url
 
+    def current_user_review_after(self, ctx: GitHubContext, after: str | None = None) -> str | None:
+        repo, issue = ctx.repo, ctx.issue_number
+        if not repo or not issue:
+            return None
+        login = self.current_login()
+        if not login:
+            return None
+        result = self._run([
+            "api",
+            "--paginate",
+            f"repos/{repo}/pulls/{issue}/reviews",
+            "--jq",
+            ".[] | @json",
+        ])
+        if result.returncode != 0:
+            return None
+        newest_url = None
+        newest_created_at = ""
+        for line in result.stdout.splitlines():
+            try:
+                review = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            user = review.get("user") if isinstance(review, dict) else None
+            if not isinstance(user, dict) or user.get("login") != login:
+                continue
+            submitted_at = review.get("submitted_at") or ""
+            if after and submitted_at <= after:
+                continue
+            if submitted_at >= newest_created_at:
+                newest_created_at = submitted_at
+                newest_url = review.get("html_url") or f"https://github.com/{repo}/pull/{issue}#pullrequestreview-{review.get('id')}"
+        return newest_url
+
     def visible_followup_after_trigger(self, ctx: GitHubContext) -> str | None:
         if ctx.comment_id:
             trigger = self.issue_comment(ctx)
             trigger_created_at = trigger.get("created_at") if isinstance(trigger, dict) else None
-            return self.current_user_thread_comment_after(ctx, trigger_created_at) or self.current_user_review_comment_after(ctx, trigger_created_at)
+            return self.current_user_thread_comment_after(ctx, trigger_created_at) or self.current_user_review_comment_after(ctx, trigger_created_at) or self.current_user_review_after(ctx, trigger_created_at)
         if ctx.review_comment_id:
             trigger = self.pull_request_review_comment(ctx)
             trigger_created_at = trigger.get("created_at") if isinstance(trigger, dict) else None
-            return self.current_user_review_comment_after(ctx, trigger_created_at) or self.current_user_thread_comment_after(ctx, trigger_created_at)
+            return self.current_user_review_comment_after(ctx, trigger_created_at) or self.current_user_thread_comment_after(ctx, trigger_created_at) or self.current_user_review_after(ctx, trigger_created_at)
         if ctx.review_id:
             review = self.pull_request_review(ctx)
             trigger_created_at = review.get("submitted_at") if isinstance(review, dict) else None
-            return self.current_user_review_comment_after(ctx, trigger_created_at) or self.current_user_thread_comment_after(ctx, trigger_created_at)
+            return self.current_user_review_comment_after(ctx, trigger_created_at) or self.current_user_thread_comment_after(ctx, trigger_created_at) or self.current_user_review_after(ctx, trigger_created_at)
         after = self.issue_created_at(ctx)
-        return self.current_user_thread_comment_after(ctx, after) or self.current_user_review_comment_after(ctx, after)
+        return self.current_user_thread_comment_after(ctx, after) or self.current_user_review_comment_after(ctx, after) or self.current_user_review_after(ctx, after)
 
     def issue_comment_addresses_current_user(self, ctx: GitHubContext) -> bool:
         body = self.issue_comment_body(ctx)

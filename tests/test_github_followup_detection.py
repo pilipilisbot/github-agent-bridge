@@ -41,6 +41,33 @@ def test_visible_followup_finds_review_comment_after_review_trigger():
     assert github.visible_followup_after_trigger(ctx) == followup["html_url"]
 
 
+def test_visible_followup_finds_review_after_issue_comment_trigger():
+    ctx = GitHubContext(
+        urls=["https://github.com/pilipilisbot/github-agent-bridge/pull/53#issuecomment-4663425063"],
+        repo="pilipilisbot/github-agent-bridge",
+        issue_number=53,
+        comment_id=4663425063,
+    )
+    followup = {
+        "id": 4325056741,
+        "user": {"login": "pilipilisbot"},
+        "state": "CHANGES_REQUESTED",
+        "submitted_at": "2026-06-09T19:50:00Z",
+        "html_url": "https://github.com/pilipilisbot/github-agent-bridge/pull/53#pullrequestreview-4325056741",
+    }
+    github = RecordingGitHubClient(
+        {
+            ("api", "user", "--jq", ".login"): "pilipilisbot\n",
+            ("api", "repos/pilipilisbot/github-agent-bridge/issues/comments/4663425063"): json.dumps({"created_at": "2026-06-09T19:45:39Z"}),
+            ("api", "--paginate", "repos/pilipilisbot/github-agent-bridge/issues/53/comments", "--jq", ".[] | @json"): "",
+            ("api", "--paginate", "repos/pilipilisbot/github-agent-bridge/pulls/53/comments", "--jq", ".[] | @json"): "",
+            ("api", "--paginate", "repos/pilipilisbot/github-agent-bridge/pulls/53/reviews", "--jq", ".[] | @json"): json.dumps(followup) + "\n",
+        }
+    )
+
+    assert github.visible_followup_after_trigger(ctx) == followup["html_url"]
+
+
 def test_visible_followup_ignores_review_comment_before_trigger():
     ctx = GitHubContext(
         urls=["https://github.com/gisce/erp/pull/27805#pullrequestreview-4325056741"],
