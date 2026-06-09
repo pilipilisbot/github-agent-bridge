@@ -1,0 +1,12 @@
+[Unit]
+Description=Complete pending GitHub Agent Bridge autoupdate reloads periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=1min
+Persistent=true
+Unit=github-agent-bridge-autoupdate.service
+
+[Install]
+WantedBy=timers.target

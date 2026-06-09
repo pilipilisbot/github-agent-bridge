@@ -13,6 +13,7 @@ This guide is for running and monitoring the bridge.
 | Environment | `systemd/env.example` copied to a private env file |
 | Units | `systemd/*.service`, `systemd/*.timer` |
 | Reader wrapper | packaged `github-agent-bridge-reader-run` console script |
+| Autoupdate wrapper | packaged `github-agent-bridge-autoupdate-run` console script |
 
 ## Production commands
 
@@ -191,6 +192,30 @@ Python executable, or another package source. Use `--skip-install` or
 `--apply` refuses releases that include SQLite schema/migration changes for now.
 Those still need the follow-up migration workflow with DB backup, migration
 status tracking, rollback/degraded-state handling, and post-checks.
+
+When a previous `--record --apply` run left `executor_reload_pending=true`,
+rerun the recorded deferred actions after the active queue drains:
+
+```bash
+gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
+  update --complete-pending --json
+```
+
+This command reads the persisted autoupdate state instead of checking GitHub or
+installing the package again. It exits without touching services while
+`pending`, `running`, or `waiting_approval` jobs exist; once the queue is quiet
+it runs the deferred systemd actions and clears the pending reload marker.
+Migration-blocked updates still remain operator-controlled until the migration
+backup/rollback workflow exists.
+
+Install and enable `github-agent-bridge-autoupdate.timer` to retry that
+completion pass automatically. The timer only calls
+`update --complete-pending`; it does not check GitHub, install a package, or
+restart the executor while active jobs remain in the queue:
+
+```bash
+systemctl --user enable --now github-agent-bridge-autoupdate.timer
+```
 
 Running-job age is not treated as a failure signal by itself. The monitor uses
 the latest semantic heartbeat, visible OpenClaw output, and persisted

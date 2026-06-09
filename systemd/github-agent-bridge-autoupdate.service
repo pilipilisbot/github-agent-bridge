@@ -1,0 +1,8 @@
+[Unit]
+Description=GitHub Agent Bridge autoupdate completion pass
+After=github-agent-bridge.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/github-agent-bridge/env
+ExecStart=%h/.local/bin/github-agent-bridge-autoupdate-run

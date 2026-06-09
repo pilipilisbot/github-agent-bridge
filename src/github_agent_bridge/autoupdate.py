@@ -41,6 +41,8 @@ DEFAULT_SYSTEMD_UNITS = {
     "reader": "github-agent-bridge-reader.timer",
     "monitor": "github-agent-bridge-monitor.timer",
     "feedback": "github-agent-bridge-feedback.timer",
+    "autoupdate_service": "github-agent-bridge-autoupdate.service",
+    "autoupdate_timer": "github-agent-bridge-autoupdate.timer",
 }
 
 
@@ -180,6 +182,8 @@ def plan_systemd_actions(decision: str, classification: dict[str, Any], *, units
                     ("reader", "github-agent-bridge-reader.timer"),
                     ("monitor", "github-agent-bridge-monitor.timer"),
                     ("feedback", "github-agent-bridge-feedback.timer"),
+                    ("autoupdate_service", "github-agent-bridge-autoupdate.service"),
+                    ("autoupdate_timer", "github-agent-bridge-autoupdate.timer"),
                 )
                 if path.endswith(filename)
             }
@@ -286,26 +290,118 @@ def apply_update_plan(
 
     if run_systemd:
         service_plan = plan.get("service_plan") if isinstance(plan.get("service_plan"), dict) else {}
-        for action in service_plan.get("immediate") or []:
-            command = str(action.get("command") or "")
-            unit = str(action.get("unit") or "")
-            if not command:
-                continue
-            if command == "daemon-reload":
-                args = [systemctl_bin, "--user", "daemon-reload"]
-            elif unit:
-                args = [systemctl_bin, "--user", command, unit]
-            else:
-                result["blocked"].append(f"missing_unit_for_{command}")
-                return result
-            proc = runner(args, None)
-            result["commands"].append(
-                _command_result("systemd", args, proc, unit=unit, reason=str(action.get("reason") or ""))
-            )
-            if proc.returncode != 0:
-                return result
+        if not _run_systemd_actions(service_plan.get("immediate") or [], result, systemctl_bin=systemctl_bin, runner=runner):
+            return result
 
     result["applied"] = True
+    return result
+
+
+def _run_systemd_actions(
+    actions: Sequence[dict[str, Any]],
+    result: dict[str, Any],
+    *,
+    systemctl_bin: str,
+    runner: CommandRunner,
+) -> bool:
+    for action in actions:
+        command = str(action.get("command") or "")
+        unit = str(action.get("unit") or "")
+        if not command:
+            continue
+        if command == "daemon-reload":
+            args = [systemctl_bin, "--user", "daemon-reload"]
+        elif unit:
+            args = [systemctl_bin, "--user", command, unit]
+        else:
+            result["blocked"].append(f"missing_unit_for_{command}")
+            return False
+        proc = runner(args, None)
+        result["commands"].append(
+            _command_result("systemd", args, proc, unit=unit, reason=str(action.get("reason") or ""))
+        )
+        if proc.returncode != 0:
+            return False
+    return True
+
+
+def complete_pending_reload(
+    db: str | Path,
+    *,
+    systemctl_bin: str = "systemctl",
+    runner: CommandRunner = _default_runner,
+) -> dict[str, Any]:
+    """Run a recorded deferred executor reload once the queue is quiet."""
+
+    queue = JobQueue(db)
+    state = load_update_state(queue)
+    active_counts = active_queue_counts(queue)
+    active_total = sum(active_counts.values())
+    result: dict[str, Any] = {
+        "completed": False,
+        "blocked": [],
+        "commands": [],
+        "queue": {
+            "active_counts": active_counts,
+            "active_total": active_total,
+        },
+        "state": state,
+    }
+
+    if not state:
+        result["blocked"].append("no_recorded_update")
+        return result
+    if state.get("state_error"):
+        result["blocked"].append(str(state["state_error"]))
+        return result
+    if not state.get("executor_reload_pending"):
+        result["completed"] = True
+        result["message"] = "no_pending_executor_reload"
+        return result
+
+    classification = state.get("classification") if isinstance(state.get("classification"), dict) else {}
+    if classification.get("migration_files"):
+        result["blocked"].append("migration_completion_not_supported")
+        return result
+    if active_total:
+        result["blocked"].append("active_jobs_block_executor_reload")
+        updated_state = {
+            **state,
+            "updated_at": utc_now(),
+            "blocked_reason": "active_jobs_block_executor_reload",
+            "queue": result["queue"],
+        }
+        save_update_state(queue, updated_state)
+        result["state"] = updated_state
+        return result
+
+    service_plan = state.get("service_plan") if isinstance(state.get("service_plan"), dict) else {}
+    deferred_actions = service_plan.get("deferred") or []
+    if not deferred_actions:
+        result["blocked"].append("no_deferred_actions")
+        return result
+
+    if not _run_systemd_actions(deferred_actions, result, systemctl_bin=systemctl_bin, runner=runner):
+        return result
+
+    completed_at = utc_now()
+    completed_state = {
+        **state,
+        "updated_at": completed_at,
+        "completed_at": completed_at,
+        "decision": "noop",
+        "executor_reload_pending": False,
+        "blocked_reason": "",
+        "queue": result["queue"],
+        "service_plan": {**service_plan, "deferred": []},
+        "completion": {
+            "commands": result["commands"],
+            "completed_at": completed_at,
+        },
+    }
+    save_update_state(queue, completed_state)
+    result["completed"] = True
+    result["state"] = completed_state
     return result
 
 
