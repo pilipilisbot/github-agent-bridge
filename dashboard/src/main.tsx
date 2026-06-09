@@ -311,6 +311,7 @@ type KnowledgeProposal = {
   reason: string;
   model: string;
   error: string | null;
+  source_event: KnowledgeEvent | null;
 };
 
 type KnowledgeRule = {
@@ -1381,6 +1382,7 @@ function KnowledgeProposals({
           <KnowledgeRowHeader scope={proposal.scope} type={proposal.type} confidence={proposal.confidence} status={proposal.status} timestamp={proposal.updated_at} now={now} />
           <p className="min-w-0 break-words text-sm font-medium [overflow-wrap:anywhere]">{proposal.rule || proposal.reason || "No reusable rule proposed."}</p>
           {proposal.reason ? <p className="min-w-0 break-words text-xs text-muted [overflow-wrap:anywhere]">{proposal.reason}</p> : null}
+          {proposal.source_event ? <KnowledgeSourceEvent event={proposal.source_event} /> : <p className="font-mono text-xs text-muted">Source event {proposal.event_id}</p>}
           {proposal.error ? <Banner tone="error" text={proposal.error} /> : null}
           {isAdmin && proposal.status === "proposed" ? (
             <div className="flex flex-wrap gap-2">
@@ -1420,6 +1422,22 @@ function KnowledgeProposals({
           ) : null}
         </article>
       ))}
+    </div>
+  );
+}
+
+function KnowledgeSourceEvent({ event }: { event: KnowledgeEvent }) {
+  const actor = event.trigger_actor || (event.actor !== "github" ? event.actor : null);
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-border bg-slate-50 px-2 py-1.5">
+      <ActorLabel actor={actor} avatarUrl={event.trigger_actor_avatar_url} framed />
+      {event.source_job_id ? (
+        <a className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-white px-2 text-xs font-semibold text-foreground hover:bg-slate-50" href={jobPath(event.source_job_id)}>
+          <Link className="h-3.5 w-3.5" aria-hidden />
+          Job #{event.source_job_id}
+        </a>
+      ) : null}
+      {event.github_urls.length > 0 ? <GitHubLinkList urls={event.github_urls} compact /> : <span className="font-mono text-xs text-muted">No GitHub link</span>}
     </div>
   );
 }

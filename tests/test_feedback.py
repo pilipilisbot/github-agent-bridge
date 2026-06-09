@@ -278,6 +278,33 @@ def test_knowledge_moderation_approves_rejects_and_deletes_rules(tmp_path):
     assert feedback.delete_rule(db, rules[0]["id"]) is False
 
 
+def test_list_proposals_includes_source_event_details(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(db, notification(), context(), "reply_comment", "auto_trusted", "review_only", trigger_actor="ecarreras")
+    event = feedback.list_events(db, "repo:gisce/erp")[0]
+    proposed = feedback.store_proposal(
+        db,
+        {
+            "event_id": event["id"],
+            "is_feedback": True,
+            "scope": "repo:gisce/erp",
+            "type": "technical_criterion",
+            "rule": "Preserve backward compatibility for existing synchronous callers when introducing asynchronous flows.",
+            "confidence": 0.74,
+            "reason": "Useful recurring compatibility criterion.",
+        },
+        auto_approve_confidence=0.9,
+    )
+
+    listed = feedback.list_proposals(db, status="proposed")
+
+    assert listed[0]["id"] == proposed["id"]
+    assert listed[0]["source_event"]["id"] == event["id"]
+    assert listed[0]["source_event"]["trigger_actor"] == "ecarreras"
+    assert listed[0]["source_event"]["github_urls"] == ["https://github.com/gisce/erp/pull/1#issuecomment-10"]
+
+
 def test_approve_proposal_can_react_to_origin_comment(tmp_path, monkeypatch):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)
