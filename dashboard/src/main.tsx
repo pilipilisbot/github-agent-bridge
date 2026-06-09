@@ -669,6 +669,8 @@ function App() {
   const jobLoadPendingRef = React.useRef(false);
   const [knowledgeRepo, setKnowledgeRepo] = React.useState("");
   const [knowledgeStatus, setKnowledgeStatus] = React.useState("proposed");
+  const [autoupdateAction, setAutoupdateAction] = React.useState<"refresh" | "apply" | "complete" | null>(null);
+  const [autoupdateError, setAutoupdateError] = React.useState("");
   const [pathname, setPathname] = React.useState(() => window.location.pathname);
   const jobRouteId = selectedJobIdFromPath(pathname);
   const isJobDetailRoute = jobRouteId !== null;
@@ -735,6 +737,24 @@ function App() {
   const deleteKnowledgeRule = React.useCallback(async (ruleId: string) => {
     await api<{ detail: string }>(`/api/knowledge/rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" });
     queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+  }, [queryClient]);
+  const runAutoupdateAction = React.useCallback(async (action: "refresh" | "apply" | "complete") => {
+    const path = {
+      refresh: "/api/autoupdate/refresh",
+      apply: "/api/autoupdate/apply",
+      complete: "/api/autoupdate/complete-pending",
+    }[action];
+    setAutoupdateAction(action);
+    setAutoupdateError("");
+    try {
+      await api(path, { method: "POST" });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-status"] });
+    } catch (error) {
+      queryClient.invalidateQueries({ queryKey: ["dashboard-status"] });
+      setAutoupdateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAutoupdateAction(null);
+    }
   }, [queryClient]);
 
   React.useEffect(() => {
@@ -864,7 +884,15 @@ function App() {
           <>
             {metrics.error ? <Banner tone="error" text={metrics.error.message} /> : null}
             {dashboardStatus.error ? <Banner tone="error" text={dashboardStatus.error.message} /> : null}
-            <AutoupdateNotice state={dashboardStatus.data?.autoupdate} isAdmin={Boolean(me.data?.user?.is_admin)} />
+            <AutoupdateNotice
+              state={dashboardStatus.data?.autoupdate}
+              isAdmin={Boolean(me.data?.user?.is_admin)}
+              runningAction={autoupdateAction}
+              actionError={autoupdateError}
+              onRefresh={() => runAutoupdateAction("refresh")}
+              onApply={() => runAutoupdateAction("apply")}
+              onCompletePending={() => runAutoupdateAction("complete")}
+            />
             <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Summary metrics">
               <Metric title="Pending" value={counts.pending ?? 0} icon={<Clock3 className="h-5 w-5" />} />
               <Metric title="Running" value={counts.running ?? 0} icon={<Activity className="h-5 w-5" />} />
@@ -929,7 +957,23 @@ function ProductMeta({ about }: { about: About | undefined }) {
   );
 }
 
-function AutoupdateNotice({ state, isAdmin }: { state: AutoupdateState | undefined; isAdmin: boolean }) {
+function AutoupdateNotice({
+  state,
+  isAdmin,
+  runningAction = null,
+  actionError = "",
+  onRefresh,
+  onApply,
+  onCompletePending,
+}: {
+  state: AutoupdateState | undefined;
+  isAdmin: boolean;
+  runningAction?: "refresh" | "apply" | "complete" | null;
+  actionError?: string;
+  onRefresh?: () => Promise<void> | void;
+  onApply?: () => Promise<void> | void;
+  onCompletePending?: () => Promise<void> | void;
+}) {
   if (!state) return null;
   const targetTag = state?.target?.tag_name?.trim();
   if (!isAdmin || !targetTag || state?.decision === "noop") return null;
@@ -939,6 +983,8 @@ function AutoupdateNotice({ state, isAdmin }: { state: AutoupdateState | undefin
   const changelog = changelogMarkdown(state.target?.body);
   const migrationCount = state.classification?.migration_files?.length ?? 0;
   const riskyCount = state.classification?.risky_files?.length ?? 0;
+  const canComplete = Boolean(state.executor_reload_pending && onCompletePending);
+  const canApply = Boolean(onApply && migrationCount === 0);
 
   return (
     <section className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950 shadow-sm" aria-label="Update available">
@@ -959,6 +1005,44 @@ function AutoupdateNotice({ state, isAdmin }: { state: AutoupdateState | undefin
             {decision}
             {state.installed_tag ? <span className="font-mono"> from {state.installed_tag}</span> : null}
           </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {onRefresh ? (
+              <button
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                disabled={runningAction !== null}
+                onClick={onRefresh}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", runningAction === "refresh" && "animate-spin")} aria-hidden />
+                {runningAction === "refresh" ? "Checking..." : "Check now"}
+              </button>
+            ) : null}
+            {canApply ? (
+              <button
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-amber-800 px-2.5 text-xs font-semibold text-white hover:bg-amber-900 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                disabled={runningAction !== null}
+                onClick={() => {
+                  if (!window.confirm(`Apply ${targetTag}? This can restart bridge services according to the recorded safe plan.`)) return;
+                  onApply?.();
+                }}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                {runningAction === "apply" ? "Applying..." : "Apply update"}
+              </button>
+            ) : null}
+            {canComplete ? (
+              <button
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                disabled={runningAction !== null}
+                onClick={onCompletePending}
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                {runningAction === "complete" ? "Completing..." : "Complete reload"}
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="grid gap-2 text-xs sm:grid-cols-3 lg:min-w-[420px]">
           <AutoupdateStat label="Impact" value={risk} />
@@ -981,6 +1065,7 @@ function AutoupdateNotice({ state, isAdmin }: { state: AutoupdateState | undefin
         </div>
       ) : null}
       {state.warnings?.length ? <div className="mt-2 font-mono text-xs text-amber-800">{state.warnings[0]}</div> : null}
+      {actionError ? <div className="mt-2 rounded-sm border border-amber-300 bg-white px-2 py-1 font-mono text-xs text-amber-900">Action failed: {actionError}</div> : null}
     </section>
   );
 }

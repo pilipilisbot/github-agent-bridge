@@ -548,6 +548,36 @@ describe("autoupdate notice", () => {
     expect(screen.getByRole("link", { name: /^release$/i })).toHaveAttribute("href", "https://github.com/pilipilisbot/github-agent-bridge/releases/tag/v0.28.0");
   });
 
+  it("offers manual admin actions for recorded autoupdate plans", async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn();
+    const onApply = vi.fn();
+    const onCompletePending = vi.fn();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    render(<AutoupdateNotice state={updateState} isAdmin={true} onRefresh={onRefresh} onApply={onApply} onCompletePending={onCompletePending} />);
+
+    await user.click(screen.getByRole("button", { name: /check now/i }));
+    await user.click(screen.getByRole("button", { name: /apply update/i }));
+    await user.click(screen.getByRole("button", { name: /complete reload/i }));
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onCompletePending).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show apply update for migration-blocked plans", () => {
+    render(
+      <AutoupdateNotice
+        state={{ ...updateState, classification: { ...updateState.classification, migration_files: ["src/github_agent_bridge/sql/2.sql"] } }}
+        isAdmin={true}
+        onApply={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /apply update/i })).not.toBeInTheDocument();
+  });
+
   it("keeps full changelog markdown for rendering", () => {
     expect(changelogMarkdown("  # v1\n\n- First\n* Second\nplain\n- Fourth\n- Fifth  ")).toBe("# v1\n\n- First\n* Second\nplain\n- Fourth\n- Fifth");
   });

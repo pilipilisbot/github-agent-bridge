@@ -193,6 +193,12 @@ Python executable, or another package source. Use `--skip-install` or
 Those still need the follow-up migration workflow with DB backup, migration
 status tracking, rollback/degraded-state handling, and post-checks.
 
+Dashboard admins can run the same first-step workflow from the autoupdate notice:
+`Check now` refreshes and records the plan, `Apply update` runs the immediate
+safe subset, and `Complete reload` runs the recorded deferred reload once the
+queue is quiet. These buttons are admin-only and keep migration releases blocked
+until the migration workflow exists.
+
 When a previous `--record --apply` run left `executor_reload_pending=true`,
 rerun the recorded deferred actions after the active queue drains:
 
