@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import secrets
+import shlex
 import sqlite3
 import sys
 import urllib.error
@@ -20,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .autoupdate import load_update_state
+from .autoupdate import apply_update_plan, complete_pending_reload, load_update_state, plan_update, record_update_plan, save_update_state
 from .cli import DEFAULT_DB
 from .feedback import approve_proposal, delete_rule, list_events, list_proposals, list_repositories, list_rules, reject_proposal
 from .dashboard_data import (
@@ -97,6 +98,52 @@ class DashboardConfig:
 def _csv_env(name: str) -> set[str]:
     raw = os.getenv(name, "")
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default)
+
+
+def _autoupdate_systemd_units() -> dict[str, str]:
+    return {
+        "executor": _env("GITHUB_AGENT_BRIDGE_EXECUTOR_UNIT", "github-agent-bridge.service"),
+        "dashboard": _env("GITHUB_AGENT_BRIDGE_DASHBOARD_UNIT", "github-agent-bridge-dashboard.service"),
+        "reader": _env("GITHUB_AGENT_BRIDGE_READER_TIMER_UNIT", "github-agent-bridge-reader.timer"),
+        "monitor": _env("GITHUB_AGENT_BRIDGE_MONITOR_TIMER_UNIT", "github-agent-bridge-monitor.timer"),
+        "feedback": _env("GITHUB_AGENT_BRIDGE_FEEDBACK_TIMER_UNIT", "github-agent-bridge-feedback.timer"),
+    }
+
+
+def _dashboard_autoupdate_plan(db: str | Path) -> dict[str, Any]:
+    return plan_update(
+        db,
+        repo=_env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_REPO", "pilipilisbot/github-agent-bridge"),
+        repo_dir=_env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_REPO_DIR", "."),
+        target_tag=_env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_TARGET_TAG") or None,
+        gh_bin=_env("GITHUB_AGENT_BRIDGE_GH_BIN", "gh"),
+        systemd_units=_autoupdate_systemd_units(),
+    )
+
+
+def _dashboard_apply_autoupdate(plan: dict[str, Any]) -> dict[str, Any]:
+    install_command = _env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_INSTALL_COMMAND")
+    return apply_update_plan(
+        plan,
+        repo=_env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_REPO", "pilipilisbot/github-agent-bridge"),
+        install_command=shlex.split(install_command) if install_command else None,
+        systemctl_bin=_env("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"),
+    )
+
+
+def _record_dashboard_autoupdate_plan(db: str | Path, plan: dict[str, Any], *, applied: bool) -> dict[str, Any]:
+    state = record_update_plan(db, plan)
+    if applied:
+        state["dashboard_applied_at"] = state["updated_at"]
+    else:
+        state.pop("dashboard_applied_at", None)
+        state["executor_reload_pending"] = False
+    save_update_state(JobQueue(db), state)
+    return state
 
 
 def _redacted_headers() -> dict[str, str]:
@@ -382,7 +429,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         queue = JobQueue(config.db)
         admin_actions = ["retry_job", "dismiss_job", "approve_knowledge_proposal", "reject_knowledge_proposal", "delete_knowledge_rule"]
         if profile.get("is_admin"):
-            admin_actions.append("view_autoupdate_plan")
+            admin_actions.extend(["view_autoupdate_plan", "refresh_autoupdate_plan", "apply_autoupdate", "complete_autoupdate_reload"])
         return {
             "service": "github-agent-bridge-dashboard",
             "read_only": False,
@@ -390,6 +437,49 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             "metrics": inspect_db_read_only(config.db),
             "autoupdate": load_update_state(queue) if profile.get("is_admin") else {},
         }
+
+    @app.post("/api/autoupdate/refresh")
+    def api_autoupdate_refresh(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        plan = _dashboard_autoupdate_plan(config.db)
+        state = _record_dashboard_autoupdate_plan(config.db, plan, applied=False)
+        return {"plan": plan, "state": state}
+
+    @app.post("/api/autoupdate/apply")
+    def api_autoupdate_apply(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        plan = _dashboard_autoupdate_plan(config.db)
+        execution = _dashboard_apply_autoupdate(plan)
+        state = _record_dashboard_autoupdate_plan(
+            config.db,
+            plan,
+            applied=bool(execution.get("applied") and not execution.get("blocked")),
+        )
+        payload = {"plan": plan, "execution": execution, "state": state}
+        if execution.get("blocked") or not execution.get("applied"):
+            return JSONResponse(payload, status_code=status.HTTP_409_CONFLICT)
+        return payload
+
+    @app.post("/api/autoupdate/complete-pending")
+    def api_autoupdate_complete_pending(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        state = load_update_state(JobQueue(config.db))
+        if not state.get("dashboard_applied_at"):
+            payload = {
+                "completion": {
+                    "completed": False,
+                    "blocked": ["autoupdate_not_applied"],
+                    "commands": [],
+                    "state": state,
+                },
+                "state": state,
+            }
+            return JSONResponse(payload, status_code=status.HTTP_409_CONFLICT)
+        completion = complete_pending_reload(
+            config.db,
+            systemctl_bin=_env("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"),
+        )
+        payload = {"completion": completion, "state": load_update_state(JobQueue(config.db))}
+        if completion.get("blocked") or not completion.get("completed"):
+            return JSONResponse(payload, status_code=status.HTTP_409_CONFLICT)
+        return payload
 
     @app.get("/api/about")
     def api_about(_: str = Depends(current_user)) -> dict[str, Any]:
