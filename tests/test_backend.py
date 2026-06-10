@@ -78,6 +78,12 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
     assert jobs.json()["jobs"][0]["work_key"] == "gisce/erp#1"
     assert jobs.json()["jobs"][0]["trigger_actor"] is None
     assert jobs.json()["jobs"][0]["trigger_actor_avatar_url"] is None
+    assert jobs.json()["jobs"][0]["model_route"] == {
+        "configured": False,
+        "model": None,
+        "thinking": None,
+        "summary": "n/a",
+    }
 
 
 def test_dashboard_autoupdate_state_requires_admin_profile(tmp_path):
@@ -530,6 +536,26 @@ def test_dashboard_exposes_safe_openclaw_session_correlation(tmp_path):
     assert session["id"] == f"github-agent-bridge-job-{job.id}"
     assert session["transcript_exposure"] == "redacted_dashboard"
     assert payload["id"] == session["id"]
+
+
+def test_dashboard_exposes_selected_model_route_on_jobs(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    job, _ = q.enqueue(notif(), Policy(trusted_orgs=["gisce"]))
+    q.claim_next("worker-1")
+    q.add_session_event(job.id, "model_route_selected", "OpenClaw model route selected", "model=openai/gpt-5.4-mini thinking=medium")
+    client = TestClient(create_app(DashboardConfig(db=db, require_auth=False)))
+
+    list_route = client.get("/api/jobs").json()["jobs"][0]["model_route"]
+    detail_route = client.get(f"/api/jobs/{job.id}").json()["job"]["model_route"]
+
+    assert list_route == {
+        "configured": True,
+        "model": "openai/gpt-5.4-mini",
+        "thinking": "medium",
+        "summary": "model=openai/gpt-5.4-mini thinking=medium",
+    }
+    assert detail_route == list_route
 
 
 def test_dashboard_exposes_redacted_job_session_events(tmp_path):

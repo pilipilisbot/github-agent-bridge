@@ -135,6 +135,12 @@ describe("status badges", () => {
     queue_wait_seconds: null,
     runtime_seconds: null,
     github_urls: [],
+    model_route: {
+      configured: true,
+      model: "openai/gpt-5.4-mini",
+      thinking: "medium",
+      summary: "model=openai/gpt-5.4-mini thinking=medium",
+    },
   };
 
   it("pulses pending and running jobs, but leaves waiting approval static", () => {
@@ -159,6 +165,8 @@ describe("status badges", () => {
     );
 
     expect(screen.getByRole("columnheader", { name: "Status" }).parentElement).toHaveClass("sticky", "top-0", "z-10");
+    expect(screen.getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
+    expect(screen.getAllByText("openai/gpt-5.4-mini · medium").length).toBeGreaterThan(0);
   });
 
   it("shows GitHub links at the top of the job detail", () => {
@@ -178,6 +186,8 @@ describe("status badges", () => {
     const content = container.textContent ?? "";
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Queue wait"));
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Timeline"));
+    expect(screen.getByText("Reasoning")).toBeInTheDocument();
+    expect(screen.getByText("medium")).toBeInTheDocument();
   });
 
   it("loads the next jobs batch when the list sentinel enters view", async () => {

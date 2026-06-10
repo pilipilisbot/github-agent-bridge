@@ -76,6 +76,45 @@ def coerce_limit(value: int, maximum: int = 200) -> int:
     return max(1, min(value, maximum))
 
 
+def parse_model_route_detail(detail: str | None) -> dict[str, Any]:
+    if not detail:
+        return {
+            "configured": False,
+            "model": None,
+            "thinking": None,
+            "summary": "n/a",
+        }
+    model = None
+    thinking = None
+    for part in detail.split():
+        if part.startswith("model="):
+            model = part.removeprefix("model=") or None
+        elif part.startswith("thinking="):
+            thinking = part.removeprefix("thinking=") or None
+    return {
+        "configured": bool(model or thinking),
+        "model": model,
+        "thinking": thinking,
+        "summary": detail,
+    }
+
+
+def jobs_select_sql(con: sqlite3.Connection) -> str:
+    if not table_exists(con, "job_session_events"):
+        return "SELECT * FROM jobs"
+    return """
+        SELECT jobs.*,
+            (
+                SELECT detail
+                FROM job_session_events
+                WHERE job_id=jobs.id AND event_type='model_route_selected'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS model_route_detail
+        FROM jobs
+    """
+
+
 def job_summary(row: sqlite3.Row) -> dict[str, Any]:
     context = json.loads(row["context_json"] or "{}")
     return {
@@ -101,6 +140,7 @@ def job_summary(row: sqlite3.Row) -> dict[str, Any]:
         "queue_wait_seconds": duration_seconds(row["created_at"], row["started_at"]) if row["started_at"] else None,
         "runtime_seconds": duration_seconds(row["started_at"], row["finished_at"]),
         "github_urls": context.get("urls", []),
+        "model_route": parse_model_route_detail(row_get(row, "model_route_detail")),
     }
 
 
@@ -215,7 +255,7 @@ def list_jobs(
             where += " AND created_at <= ?" if where else " WHERE created_at <= ?"
             args.append(until)
         args.append(coerce_limit(limit))
-        rows = con.execute(f"SELECT * FROM jobs{where} ORDER BY {JOB_LIST_ORDER_SQL} LIMIT ?", args).fetchall()
+        rows = con.execute(f"{jobs_select_sql(con)}{where} ORDER BY {JOB_LIST_ORDER_SQL} LIMIT ?", args).fetchall()
     return [job_summary(row) for row in rows]
 
 
@@ -259,7 +299,7 @@ def get_job_detail(db: str | Path, job_id: int) -> dict[str, Any] | None:
     with readonly_connect(path) as con:
         if not table_exists(con, "jobs"):
             return None
-        row = con.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        row = con.execute(f"{jobs_select_sql(con)} WHERE jobs.id=?", (job_id,)).fetchone()
         if row is None:
             return None
         job = job_summary(row)
