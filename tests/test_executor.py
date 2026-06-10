@@ -323,6 +323,28 @@ def test_work_allowed_dispatch_blocks_after_auto_retry_without_visible_github_fo
     assert stored.attempts == 2
 
 
+def test_reply_comment_duplicate_noop_without_followup_is_done(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_pr_comment(queue)
+    dispatcher = RecordingDispatcher(
+        stdout=(
+            "No GitHub follow-up comment was appropriate because the thread already contains "
+            "the same answer. Adding another comment would be duplicate noise."
+        )
+    )
+    github = FakeGitHub(assigned=True)
+    github.followup_url = None
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
+    assert dispatcher.jobs[0].id == job.id
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "done"
+    assert stored.last_error is None
+
+
 def test_workflow_run_failed_dispatch_does_not_require_thread_followup(tmp_path):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     job = enqueue_workflow_run_failed(queue)

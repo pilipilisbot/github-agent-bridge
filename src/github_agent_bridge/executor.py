@@ -126,7 +126,7 @@ class ExecutorPool:
         return True
 
     def _missing_followup_is_acceptable(self, job, result) -> bool:
-        if job.action != "sync_after_merge":
+        if job.action not in {"reply_comment", "sync_after_merge"}:
             return False
         output = f"{result.stdout}\n{result.stderr}".lower()
         return any(marker in output for marker in NO_FOLLOWUP_OK_MARKERS) and any(marker in output for marker in NO_FOLLOWUP_DUPLICATE_MARKERS)
