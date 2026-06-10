@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.40.1 (2026-06-10)
+
+### Bug Fixes
+
+- Accept review and duplicate-skip followups
+  ([`919b007`](https://github.com/pilipilisbot/github-agent-bridge/commit/919b0077b3cec117899dbbda7133a1ac2064b7dd))
+
+
 ## v0.40.0 (2026-06-09)
 
 ### Features
