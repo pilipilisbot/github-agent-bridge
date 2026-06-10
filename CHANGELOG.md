@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.41.0 (2026-06-10)
+
+### Bug Fixes
+
+- Gate dashboard autoupdate completion
+  ([`ec268fa`](https://github.com/pilipilisbot/github-agent-bridge/commit/ec268fa7bf779e07ff2e8f43baadee19b037cbcd))
+
+### Features
+
+- Add dashboard autoupdate actions
+  ([`78fb299`](https://github.com/pilipilisbot/github-agent-bridge/commit/78fb299c0054a1187f484f6f4b0c3384e32bddb3))
+
+
 ## v0.40.1 (2026-06-10)
 
 ### Bug Fixes
