@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.42.1 (2026-06-11)
+
+### Bug Fixes
+
+- **dashboard**: Remove model route from jobs list
+  ([`92c5ea4`](https://github.com/pilipilisbot/github-agent-bridge/commit/92c5ea496b50397b300b122c2013e3fc32dbb59f))
+
+
 ## v0.42.0 (2026-06-11)
 
 ### Features
