@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.42.0 (2026-06-11)
+
+### Features
+
+- Show job model routes in dashboard
+  ([`b1422a5`](https://github.com/pilipilisbot/github-agent-bridge/commit/b1422a5eb453050ccd2f66f4057d0324453696f9))
+
+
 ## v0.41.0 (2026-06-10)
 
 ### Bug Fixes
