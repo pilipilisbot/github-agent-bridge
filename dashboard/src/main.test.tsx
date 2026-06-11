@@ -154,7 +154,7 @@ describe("status badges", () => {
     expect(screen.getByText("waiting_approval").querySelector("span")).not.toHaveClass("animate-live-pulse");
   });
 
-  it("keeps the jobs table header above animated status dots while scrolling", () => {
+  it("keeps the jobs table header above animated status dots while hiding model routing from the list", () => {
     render(
       <JobsList
         jobs={[job]}
@@ -165,8 +165,8 @@ describe("status badges", () => {
     );
 
     expect(screen.getByRole("columnheader", { name: "Status" }).parentElement).toHaveClass("sticky", "top-0", "z-10");
-    expect(screen.getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
-    expect(screen.getAllByText("openai/gpt-5.4-mini · medium").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("columnheader", { name: "Model" })).not.toBeInTheDocument();
+    expect(screen.queryByText("openai/gpt-5.4-mini · medium")).not.toBeInTheDocument();
   });
 
   it("shows GitHub links at the top of the job detail", () => {

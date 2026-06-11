@@ -1972,7 +1972,6 @@ function JobsList({
               <th className="px-2 py-2 font-semibold">Status</th>
               <th className="px-2 py-2 font-semibold">Repo / thread</th>
               <th className="px-2 py-2 font-semibold">Action</th>
-              <th className="px-2 py-2 font-semibold">Model</th>
               <th className="px-2 py-2 font-semibold">Actor</th>
               <th className="px-2 py-2 font-semibold">Attempts</th>
               <th className="px-2 py-2 font-semibold">Queue wait</th>
@@ -1999,9 +1998,6 @@ function JobsList({
                 <td className="px-2 py-3">
                   <div>{job.action}</div>
                   <div className="text-xs text-muted">{job.intent}</div>
-                </td>
-                <td className="px-2 py-3">
-                  <ModelRoutePill route={job.model_route} />
                 </td>
                 <td className="px-2 py-3">
                   <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} />
@@ -2108,7 +2104,6 @@ function JobCard({
           <MiniStat label="Runtime" value={formatSeconds(jobRuntimeSeconds(job, now))} />
           <MiniStat label="Updated" value={<TimeText value={job.updated_at} compact relative now={now} />} />
         </div>
-        <ModelRoutePill route={job.model_route} />
       </button>
       {canRetry || canDismiss ? (
         <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
