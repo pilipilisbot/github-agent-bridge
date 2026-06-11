@@ -149,8 +149,10 @@ def test_executor_records_session_activity_events(tmp_path):
     assert pool.work_one("worker-test") is True
 
     event_types = [event["event_type"] for event in job_session_events(db, dispatcher.jobs[0].id)]
-    assert event_types == ["claimed", "dispatch_started", "openclaw_stdout", "openclaw_stderr", "dispatch_finished", "done"]
-    stderr_event = job_session_events(db, dispatcher.jobs[0].id)[3]
+    assert event_types == ["claimed", "dispatch_started", "model_route_selected", "openclaw_stdout", "openclaw_stderr", "dispatch_finished", "done"]
+    route_event = job_session_events(db, dispatcher.jobs[0].id)[2]
+    assert route_event["detail"] == "OpenClaw default model route"
+    stderr_event = job_session_events(db, dispatcher.jobs[0].id)[4]
     assert stderr_event["detail"] == "token=[redacted] [redacted]"
 
 

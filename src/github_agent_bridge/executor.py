@@ -80,8 +80,7 @@ class ExecutorPool:
             reaction_ok = self.react_eyes_for_job_contexts(job)
             self.queue.add_session_event(job.id, "dispatch_started", "OpenClaw agent dispatch started", f"reaction_ok={reaction_ok}")
             model_route = self.policy.model_route_for(job.repo, job.action, job.work_intent)
-            if model_route.configured:
-                self.queue.add_session_event(job.id, "model_route_selected", "OpenClaw model route selected", model_route.summary())
+            self.queue.add_session_event(job.id, "model_route_selected", "OpenClaw model route selected", model_route.summary())
             result = self.dispatcher.dispatch(
                 job,
                 self.policy,

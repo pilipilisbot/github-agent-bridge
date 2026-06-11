@@ -113,7 +113,15 @@ type Job = {
   queue_wait_seconds: number | null;
   runtime_seconds: number | null;
   github_urls: string[];
+  model_route?: JobModelRoute;
   worklog?: WorklogEntry[];
+};
+
+type JobModelRoute = {
+  configured: boolean;
+  model: string | null;
+  thinking: string | null;
+  summary: string;
 };
 
 type WorklogEntry = {
@@ -1964,6 +1972,7 @@ function JobsList({
               <th className="px-2 py-2 font-semibold">Status</th>
               <th className="px-2 py-2 font-semibold">Repo / thread</th>
               <th className="px-2 py-2 font-semibold">Action</th>
+              <th className="px-2 py-2 font-semibold">Model</th>
               <th className="px-2 py-2 font-semibold">Actor</th>
               <th className="px-2 py-2 font-semibold">Attempts</th>
               <th className="px-2 py-2 font-semibold">Queue wait</th>
@@ -1990,6 +1999,9 @@ function JobsList({
                 <td className="px-2 py-3">
                   <div>{job.action}</div>
                   <div className="text-xs text-muted">{job.intent}</div>
+                </td>
+                <td className="px-2 py-3">
+                  <ModelRoutePill route={job.model_route} />
                 </td>
                 <td className="px-2 py-3">
                   <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} />
@@ -2096,6 +2108,7 @@ function JobCard({
           <MiniStat label="Runtime" value={formatSeconds(jobRuntimeSeconds(job, now))} />
           <MiniStat label="Updated" value={<TimeText value={job.updated_at} compact relative now={now} />} />
         </div>
+        <ModelRoutePill route={job.model_route} />
       </button>
       {canRetry || canDismiss ? (
         <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
@@ -2199,6 +2212,38 @@ function ActorLabel({ actor, avatarUrl, framed = false }: { actor: string | null
   return <span className="inline-flex min-w-0 max-w-full items-center gap-1 font-mono text-xs text-muted">{content}</span>;
 }
 
+function modelRouteLabel(route: JobModelRoute | null | undefined) {
+  if (!route) return "n/a";
+  if (route.model && route.thinking) return `${route.model} · ${route.thinking}`;
+  if (route.model) return route.model;
+  if (route.thinking) return `thinking ${route.thinking}`;
+  return route.summary || "OpenClaw default";
+}
+
+function modelRouteModel(route: JobModelRoute | null | undefined) {
+  return route?.model ?? "OpenClaw default";
+}
+
+function modelRouteThinking(route: JobModelRoute | null | undefined) {
+  return route?.thinking ?? "OpenClaw default";
+}
+
+function modelRouteSource(route: JobModelRoute | null | undefined) {
+  if (!route) return "n/a";
+  return route.configured ? "configured" : route.summary;
+}
+
+function ModelRoutePill({ route }: { route: JobModelRoute | null | undefined }) {
+  const label = modelRouteLabel(route);
+  const title = route?.summary || label;
+  return (
+    <span className="inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-md border border-border bg-white px-2 text-xs font-semibold text-muted" title={title}>
+      <Brain className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="truncate font-mono">{label}</span>
+    </span>
+  );
+}
+
 function JobDetail({ job, session, sessionEvents, transcript, now, compact = false }: { job: Job; session: SessionCorrelation | undefined; sessionEvents: SessionEvent[] | undefined; transcript: TranscriptEntry[] | undefined; now: number; compact?: boolean }) {
   const shareHref = jobPath(job.id);
   const eventRows = sessionEvents ?? [];
@@ -2231,6 +2276,11 @@ function JobDetail({ job, session, sessionEvents, transcript, now, compact = fal
         <MiniStat label="Queue wait" value={formatSeconds(liveWait)} />
         <MiniStat label={job.status === "running" ? "Running for" : "Runtime"} value={formatSeconds(liveRuntime)} />
         <MiniStat label="Coalesced" value={String(job.coalesced_count)} />
+      </div>
+      <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-3")}>
+        <MiniStat label="Model" value={modelRouteModel(job.model_route)} />
+        <MiniStat label="Reasoning" value={modelRouteThinking(job.model_route)} />
+        <MiniStat label="Route" value={modelRouteSource(job.model_route)} />
       </div>
       <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-4")}>
         <MiniStat label="Created" value={<TimeText value={job.created_at} compact relative now={now} />} />
