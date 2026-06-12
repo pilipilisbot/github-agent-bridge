@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.42.2 (2026-06-12)
+
+### Bug Fixes
+
+- Preserve jobs list state from detail
+  ([`5e7b39f`](https://github.com/pilipilisbot/github-agent-bridge/commit/5e7b39f584650441ce24a567d60f0553336d2125))
+
+
 ## v0.42.1 (2026-06-11)
 
 ### Bug Fixes
