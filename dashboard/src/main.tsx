@@ -807,6 +807,10 @@ function App() {
     window.history.pushState({}, "", jobPath(jobId));
     setPathname(window.location.pathname);
   }, []);
+  const navigateDashboard = React.useCallback((path: string) => {
+    window.history.pushState({}, "", path);
+    setPathname(window.location.pathname);
+  }, []);
 
   const counts = metrics.data?.metrics.status_counts ?? {};
   const jobRows = jobs.data?.jobs ?? [];
@@ -841,13 +845,14 @@ function App() {
       </header>
 
       <main className="mx-auto grid w-full max-w-[1440px] gap-4 px-3 py-4 sm:px-4 md:px-6 md:py-5">
-        <SectionNav isDashboardRoute={isDashboardRoute} isSystemRoute={isSystemRoute} isKnowledgeRoute={isKnowledgeRoute} knowledgeBadgeCount={dashboardStatus.data?.metrics?.knowledge?.proposed ?? 0} />
+        <SectionNav isDashboardRoute={isDashboardRoute} isSystemRoute={isSystemRoute} isKnowledgeRoute={isKnowledgeRoute} knowledgeBadgeCount={dashboardStatus.data?.metrics?.knowledge?.proposed ?? 0} onNavigate={navigateDashboard} />
         {jobRouteId !== null ? (
           <JobDetailPage
             jobId={jobRouteId}
             detail={detailStatus}
             selectedJob={selectedJob}
             user={me.data?.user}
+            onBackToDashboard={() => navigateDashboard("/")}
             onRetry={retryJob}
             onDismiss={dismissJob}
             onRefresh={() => {
@@ -1147,23 +1152,25 @@ function SectionNav({
   isSystemRoute = false,
   isKnowledgeRoute,
   knowledgeBadgeCount = 0,
+  onNavigate,
 }: {
   isDashboardRoute: boolean;
   isSystemRoute?: boolean;
   isKnowledgeRoute: boolean;
   knowledgeBadgeCount?: number;
+  onNavigate?: (path: string) => void;
 }) {
   return (
     <nav className="flex min-w-0 rounded-lg border border-border bg-panel p-1 shadow-sm" aria-label="Dashboard sections">
-      <SectionLink href="/" active={isDashboardRoute}>
+      <SectionLink href="/" active={isDashboardRoute} onNavigate={onNavigate}>
         <TerminalSquare className="h-4 w-4" aria-hidden />
         <span>Jobs</span>
       </SectionLink>
-      <SectionLink href="/system" active={isSystemRoute}>
+      <SectionLink href="/system" active={isSystemRoute} onNavigate={onNavigate}>
         <Gauge className="h-4 w-4" aria-hidden />
         <span>System</span>
       </SectionLink>
-      <SectionLink href="/knowledge" active={isKnowledgeRoute}>
+      <SectionLink href="/knowledge" active={isKnowledgeRoute} onNavigate={onNavigate}>
         <Brain className="h-4 w-4" aria-hidden />
         <span>Knowledge</span>
         {knowledgeBadgeCount > 0 ? (
@@ -1229,9 +1236,17 @@ function SystemPage({
   );
 }
 
-function SectionLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function SectionLink({ href, active, children, onNavigate }: { href: string; active: boolean; children: React.ReactNode; onNavigate?: (path: string) => void }) {
   return (
-    <a className={cn("inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-semibold sm:flex-none", active ? "bg-primary text-white shadow-sm" : "text-muted hover:bg-slate-50 hover:text-foreground")} href={href}>
+    <a
+      className={cn("inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-semibold sm:flex-none", active ? "bg-primary text-white shadow-sm" : "text-muted hover:bg-slate-50 hover:text-foreground")}
+      href={href}
+      onClick={(event) => {
+        if (!onNavigate || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+        event.preventDefault();
+        onNavigate(href);
+      }}
+    >
       {children}
     </a>
   );
@@ -1242,6 +1257,7 @@ function JobDetailPage({
   detail,
   selectedJob,
   user,
+  onBackToDashboard,
   onRetry,
   onDismiss,
   onRefresh,
@@ -1250,6 +1266,7 @@ function JobDetailPage({
   detail: React.ReactNode;
   selectedJob: Job | null;
   user: UserProfile | undefined;
+  onBackToDashboard: () => void;
   onRetry: (jobId: number) => Promise<void>;
   onDismiss: (jobId: number) => Promise<void>;
   onRefresh: () => void;
@@ -1262,7 +1279,15 @@ function JobDetailPage({
   return (
     <div className="grid min-w-0 gap-3 sm:gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <a className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-slate-50" href="/">
+        <a
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-slate-50"
+          href="/"
+          onClick={(event) => {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+            event.preventDefault();
+            onBackToDashboard();
+          }}
+        >
           <ArrowLeft className="h-4 w-4" aria-hidden />
           Dashboard
         </a>
@@ -2920,6 +2945,7 @@ export {
   AutoupdateNotice,
   Filters,
   JobDetail,
+  JobDetailPage,
   JobsList,
   ProductMeta,
   SectionNav,

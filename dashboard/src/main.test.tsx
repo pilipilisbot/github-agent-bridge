@@ -6,6 +6,7 @@ import {
   AutoupdateNotice,
   Filters,
   JobDetail,
+  JobDetailPage,
   JobsList,
   KnowledgePage,
   KnowledgeProposals,
@@ -67,17 +68,28 @@ describe("dashboard routing and API query helpers", () => {
   });
 
   it("shows a knowledge badge when proposed rules need moderation", () => {
+    const onNavigate = vi.fn();
     const { rerender } = render(<SectionNav isDashboardRoute={true} isSystemRoute={false} isKnowledgeRoute={false} knowledgeBadgeCount={2} />);
 
     expect(screen.getByRole("link", { name: /Knowledge/i })).toContainElement(screen.getByLabelText("2 proposed knowledge items"));
     expect(screen.getByRole("link", { name: /Jobs/i })).toHaveClass("bg-primary");
     expect(screen.getByRole("link", { name: /System/i })).not.toHaveClass("bg-primary");
 
-    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={true} isKnowledgeRoute={false} knowledgeBadgeCount={0} />);
+    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={true} isKnowledgeRoute={false} knowledgeBadgeCount={0} onNavigate={onNavigate} />);
     expect(screen.getByRole("link", { name: /System/i })).toHaveClass("bg-primary");
 
     rerender(<SectionNav isDashboardRoute={false} isSystemRoute={false} isKnowledgeRoute={true} knowledgeBadgeCount={0} />);
     expect(screen.queryByLabelText(/proposed knowledge/i)).not.toBeInTheDocument();
+  });
+
+  it("uses client-side navigation for dashboard section links", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<SectionNav isDashboardRoute={false} isSystemRoute={false} isKnowledgeRoute={true} onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole("link", { name: /Jobs/i }));
+
+    expect(onNavigate).toHaveBeenCalledWith("/");
   });
 
   it("refreshes job data only for session events that can change job state", () => {
@@ -188,6 +200,27 @@ describe("status badges", () => {
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Timeline"));
     expect(screen.getByText("Reasoning")).toBeInTheDocument();
     expect(screen.getByText("medium")).toBeInTheDocument();
+  });
+
+  it("returns from job detail through client-side dashboard navigation", async () => {
+    const user = userEvent.setup();
+    const onBackToDashboard = vi.fn();
+    render(
+      <JobDetailPage
+        jobId={58}
+        detail={<div>Job detail content</div>}
+        selectedJob={job}
+        user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
+        onBackToDashboard={onBackToDashboard}
+        onRetry={vi.fn()}
+        onDismiss={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("link", { name: /Dashboard/i }));
+
+    expect(onBackToDashboard).toHaveBeenCalledTimes(1);
   });
 
   it("loads the next jobs batch when the list sentinel enters view", async () => {
