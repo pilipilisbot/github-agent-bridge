@@ -189,17 +189,25 @@ Set `GITHUB_AGENT_BRIDGE_AUTOUPDATE_INSTALL_COMMAND` or pass
 Python executable, or another package source. Use `--skip-install` or
 `--skip-systemd-actions` for a partial operator-controlled run.
 
-`--apply` refuses releases that include SQLite schema/migration changes for now.
-Those still need the follow-up migration workflow with DB backup, migration
-status tracking, rollback/degraded-state handling, and post-checks.
+For releases that include SQLite schema/migration changes, `--apply` stays
+conservative. If the active queue is not quiet, it refuses before installing and
+records `active_jobs_block_migration`. If the queue is quiet, it backs up the
+SQLite database first, installs the target package, runs the packaged schema
+initialization from a fresh Python subprocess, restarts the safe immediate
+systemd units, and then runs post-checks for installed version, queue state, and
+restarted services. Set `GITHUB_AGENT_BRIDGE_AUTOUPDATE_BACKUP_DIR` or pass
+`--backup-dir` to choose where the pre-migration SQLite backups are written.
+Migration or post-check failures are recorded in autoupdate state with
+`degraded=true`, the backup path, command output, and the blocker that needs
+operator recovery.
 
 Dashboard admins can run the same first-step workflow from the autoupdate notice:
 `Check now` refreshes and records the plan, `Apply update` runs the immediate
 safe subset, and `Complete reload` runs the recorded deferred reload once the
-queue is quiet. These buttons are admin-only and keep migration releases blocked
-until the migration workflow exists. A refresh-only check does not arm the
-deferred executor completion action; the dashboard only enables completion after
-an update has been applied/staged.
+queue is quiet. These buttons are admin-only; migration releases require a quiet
+queue before `Apply update` will install or restart anything. A refresh-only
+check does not arm the deferred executor completion action; the dashboard only
+enables completion after an update has been applied/staged.
 
 When a previous `--record --apply` run left `executor_reload_pending=true`,
 rerun the recorded deferred actions after the active queue drains:
@@ -213,8 +221,9 @@ This command reads the persisted autoupdate state instead of checking GitHub or
 installing the package again. It exits without touching services while
 `pending`, `running`, or `waiting_approval` jobs exist; once the queue is quiet
 it runs the deferred systemd actions and clears the pending reload marker.
-Migration-blocked updates still remain operator-controlled until the migration
-backup/rollback workflow exists.
+Migration-blocked updates should be retried with `--apply` or the dashboard
+`Apply update` action after the queue drains so the backup, schema application,
+restart, and post-check sequence can run in one quiet window.
 
 Install and enable `github-agent-bridge-autoupdate.timer` to retry that
 completion pass automatically. The timer only calls

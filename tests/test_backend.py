@@ -154,7 +154,7 @@ def test_dashboard_autoupdate_apply_runs_safe_plan_and_records_state(tmp_path, m
         "warnings": [],
     }
     monkeypatch.setattr("github_agent_bridge.backend._dashboard_autoupdate_plan", lambda db: plan)
-    monkeypatch.setattr("github_agent_bridge.backend._dashboard_apply_autoupdate", lambda plan: {"applied": True, "blocked": [], "commands": []})
+    monkeypatch.setattr("github_agent_bridge.backend._dashboard_apply_autoupdate", lambda plan, db: {"applied": True, "blocked": [], "commands": []})
 
     response = client.post("/api/autoupdate/apply")
 
@@ -185,7 +185,7 @@ def test_dashboard_autoupdate_apply_does_not_arm_completion_when_blocked(tmp_pat
     monkeypatch.setattr("github_agent_bridge.backend._dashboard_autoupdate_plan", lambda db: plan)
     monkeypatch.setattr(
         "github_agent_bridge.backend._dashboard_apply_autoupdate",
-        lambda plan: {"applied": False, "blocked": ["active_jobs_block_executor_reload"], "commands": []},
+        lambda plan, db: {"applied": False, "blocked": ["active_jobs_block_executor_reload"], "commands": []},
     )
 
     response = client.post("/api/autoupdate/apply")

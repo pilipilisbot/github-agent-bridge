@@ -125,11 +125,13 @@ def _dashboard_autoupdate_plan(db: str | Path) -> dict[str, Any]:
     )
 
 
-def _dashboard_apply_autoupdate(plan: dict[str, Any]) -> dict[str, Any]:
+def _dashboard_apply_autoupdate(plan: dict[str, Any], db: str | Path) -> dict[str, Any]:
     install_command = _env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_INSTALL_COMMAND")
     return apply_update_plan(
         plan,
+        db=db,
         repo=_env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_REPO", "pilipilisbot/github-agent-bridge"),
+        backup_dir=_env("GITHUB_AGENT_BRIDGE_AUTOUPDATE_BACKUP_DIR") or None,
         install_command=shlex.split(install_command) if install_command else None,
         systemctl_bin=_env("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"),
     )
@@ -447,7 +449,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.post("/api/autoupdate/apply")
     def api_autoupdate_apply(_: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
         plan = _dashboard_autoupdate_plan(config.db)
-        execution = _dashboard_apply_autoupdate(plan)
+        execution = _dashboard_apply_autoupdate(plan, config.db)
         state = _record_dashboard_autoupdate_plan(
             config.db,
             plan,

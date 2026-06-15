@@ -267,11 +267,15 @@ def cmd_update(args: argparse.Namespace) -> int:
         install_command = shlex.split(args.install_command) if args.install_command else None
         payload["execution"] = apply_update_plan(
             plan,
+            db=args.db,
             repo=args.repo,
+            backup_dir=args.backup_dir,
             install_command=install_command,
             systemctl_bin=args.systemctl_bin,
             run_install=not args.skip_install,
+            run_migrations=not args.skip_migrations,
             run_systemd=not args.skip_systemd_actions,
+            run_postchecks=not args.skip_postchecks,
         )
     if args.record:
         payload["state"] = record_update_plan(args.db, plan)
@@ -405,9 +409,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--record", action="store_true", help="persist the update decision in the bridge state table")
     s.add_argument("--apply", action="store_true", help="install the target release and run the plan's immediate systemd actions")
     s.add_argument("--install-command", default=os.getenv("GITHUB_AGENT_BRIDGE_AUTOUPDATE_INSTALL_COMMAND"), help="override the package install command used by --apply")
+    s.add_argument("--backup-dir", default=os.getenv("GITHUB_AGENT_BRIDGE_AUTOUPDATE_BACKUP_DIR"), help="directory for SQLite backups before migration updates")
     s.add_argument("--systemctl-bin", default=os.getenv("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"))
     s.add_argument("--skip-install", action="store_true", help="with --apply, run service actions without installing the target package")
+    s.add_argument("--skip-migrations", action="store_true", help="with --apply, skip SQLite schema initialization after a migration-tagged install")
     s.add_argument("--skip-systemd-actions", action="store_true", help="with --apply, install the package without running systemd actions")
+    s.add_argument("--skip-postchecks", action="store_true", help="with --apply, skip installed-version, service, and queue post-checks")
     s.add_argument("--complete-pending", action="store_true", help="run recorded deferred reload actions once the queue is quiet")
     s.add_argument("--json", action="store_true", help="pretty-print structured JSON")
     s.set_defaults(func=cmd_update)
