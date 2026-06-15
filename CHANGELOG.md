@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.43.0 (2026-06-15)
+
+### Features
+
+- Finish safe autoupdate migrations
+  ([`be6bb7c`](https://github.com/pilipilisbot/github-agent-bridge/commit/be6bb7c78cad17f194fb3cc6b7d808b8b32f17d2))
+
+
 ## v0.42.2 (2026-06-12)
 
 ### Bug Fixes
