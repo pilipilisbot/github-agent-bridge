@@ -234,6 +234,7 @@ def test_apply_update_plan_installs_and_runs_immediate_systemd_actions():
         repo="pilipilisbot/github-agent-bridge",
         install_command=["python", "-m", "pip", "install", "pkg"],
         runner=runner,
+        run_postchecks=False,
     )
 
     assert execution["applied"] is True
@@ -245,7 +246,7 @@ def test_apply_update_plan_installs_and_runs_immediate_systemd_actions():
     ]
 
 
-def test_apply_update_plan_blocks_migration_execution_before_install():
+def test_apply_update_plan_blocks_migration_execution_without_db():
     calls: list[list[str]] = []
 
     execution = apply_update_plan(
@@ -259,8 +260,150 @@ def test_apply_update_plan_blocks_migration_execution_before_install():
     )
 
     assert execution["applied"] is False
-    assert execution["blocked"] == ["migration_execution_not_supported"]
+    assert execution["blocked"] == ["missing_db_for_migration"]
     assert calls == []
+
+
+def test_apply_update_plan_blocks_migration_execution_while_jobs_are_active(tmp_path, monkeypatch):
+    monkeypatch.setattr("github_agent_bridge.actors.github_actor_details_for_context", lambda ctx, *, gh_bin="gh": None)
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    enqueue_job(q)
+    calls: list[list[str]] = []
+
+    execution = apply_update_plan(
+        {
+            "target": {"tag_name": "v1.2.4"},
+            "decision": "defer_migration",
+            "queue": {"active_total": 1},
+            "blocked_reason": "active_jobs_block_migration",
+            "installed_version": "1.2.3",
+            "installed_tag": "v1.2.3",
+            "warnings": [],
+            "classification": {
+                "risk": "migration_required",
+                "migration_files": ["src/github_agent_bridge/sql/schema.sql"],
+                "risky_files": [],
+                "systemd_files": [],
+            },
+            "service_plan": {"immediate": [], "deferred": [{"command": "restart", "unit": "github-agent-bridge.service"}]},
+        },
+        db=db,
+        runner=lambda args, cwd: calls.append(list(args)) or completed("ok"),
+    )
+
+    state = load_update_state(q)
+    assert execution["applied"] is False
+    assert execution["blocked"] == ["active_jobs_block_migration"]
+    assert calls == []
+    assert state["degraded"] is False
+    assert state["blocked_reason"] == "active_jobs_block_migration"
+    assert state["migration"]["status"] == "deferred"
+
+
+def test_apply_update_plan_backs_up_migrates_restarts_and_postchecks(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    backup_dir = tmp_path / "backups"
+    calls: list[list[str]] = []
+
+    def runner(args, cwd: Path | None):
+        calls.append(list(args))
+        if args == ["python", "-m", "pip", "install", "pkg"]:
+            return completed("installed")
+        if args == ["migrate-db"]:
+            return completed("migrated")
+        if args[:3] == ["systemctl", "--user", "try-restart"]:
+            return completed("restarted")
+        if args[:3] == ["systemctl", "--user", "restart"]:
+            return completed("restarted")
+        if args[:3] == ["systemctl", "--user", "is-active"]:
+            return completed("active\n")
+        if len(args) >= 3 and args[1] == "-c":
+            return completed("1.2.4\n")
+        return completed("unexpected", returncode=1)
+
+    execution = apply_update_plan(
+        {
+            "target": {"tag_name": "v1.2.4"},
+            "decision": "stage_full_reload",
+            "queue": {"active_total": 0},
+            "blocked_reason": "",
+            "installed_version": "1.2.3",
+            "installed_tag": "v1.2.3",
+            "warnings": [],
+            "classification": {
+                "risk": "migration_required",
+                "migration_files": ["src/github_agent_bridge/sql/schema.sql"],
+                "risky_files": [],
+                "systemd_files": [],
+            },
+            "service_plan": {
+                "immediate": [
+                    {"command": "try-restart", "unit": "github-agent-bridge-dashboard.service"},
+                    {"command": "restart", "unit": "github-agent-bridge.service"},
+                ]
+            },
+        },
+        db=db,
+        backup_dir=backup_dir,
+        install_command=["python", "-m", "pip", "install", "pkg"],
+        migration_command=["migrate-db"],
+        runner=runner,
+    )
+
+    assert execution["applied"] is True
+    assert execution["blocked"] == []
+    assert execution["migration"]["status"] == "complete"
+    assert Path(execution["migration"]["backup"]["path"]).exists()
+    assert execution["postcheck"]["ok"] is True
+    assert ["migrate-db"] in calls
+    assert ["systemctl", "--user", "is-active", "github-agent-bridge.service"] in calls
+
+
+def test_apply_update_plan_records_degraded_state_when_migration_fails(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+
+    def runner(args, cwd: Path | None):
+        if args == ["python", "-m", "pip", "install", "pkg"]:
+            return completed("installed")
+        if args == ["migrate-db"]:
+            return completed("boom", returncode=1)
+        return completed("unexpected", returncode=1)
+
+    execution = apply_update_plan(
+        {
+            "target": {"tag_name": "v1.2.4"},
+            "decision": "stage_full_reload",
+            "queue": {"active_total": 0},
+            "blocked_reason": "",
+            "installed_version": "1.2.3",
+            "installed_tag": "v1.2.3",
+            "warnings": [],
+            "classification": {
+                "risk": "migration_required",
+                "migration_files": ["src/github_agent_bridge/sql/schema.sql"],
+                "risky_files": [],
+                "systemd_files": [],
+            },
+            "service_plan": {"immediate": [{"command": "restart", "unit": "github-agent-bridge.service"}]},
+        },
+        db=db,
+        backup_dir=tmp_path / "backups",
+        install_command=["python", "-m", "pip", "install", "pkg"],
+        migration_command=["migrate-db"],
+        runner=runner,
+    )
+
+    state = load_update_state(q)
+    assert execution["applied"] is False
+    assert execution["blocked"] == ["migration_apply_failed"]
+    assert execution["migration"]["status"] == "rolled_back"
+    assert state["degraded"] is True
+    assert state["blocked_reason"] == "migration_apply_failed"
+    assert state["migration"]["backup"]["path"]
+    assert state["migration"]["rollback"]["source"] == state["migration"]["backup"]["path"]
 
 
 def test_apply_update_plan_stops_before_services_when_install_fails():
@@ -281,6 +424,7 @@ def test_apply_update_plan_stops_before_services_when_install_fails():
         },
         install_command=["python", "-m", "pip", "install", "pkg"],
         runner=runner,
+        run_postchecks=False,
     )
 
     assert execution["applied"] is False

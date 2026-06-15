@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -44,6 +45,7 @@ DEFAULT_SYSTEMD_UNITS = {
     "autoupdate_service": "github-agent-bridge-autoupdate.service",
     "autoupdate_timer": "github-agent-bridge-autoupdate.timer",
 }
+DEFAULT_BACKUP_DIR = Path("~/.local/state/github-agent-bridge/backups").expanduser()
 
 
 @dataclass(frozen=True)
@@ -250,14 +252,150 @@ def _command_result(
     }
 
 
+def _backup_sqlite_db(db: str | Path, backup_dir: str | Path | None = None) -> dict[str, Any]:
+    db_path = Path(db).expanduser()
+    backup_root = Path(backup_dir).expanduser() if backup_dir else DEFAULT_BACKUP_DIR
+    backup_root.mkdir(parents=True, exist_ok=True)
+    timestamp = utc_now().replace(":", "").replace("-", "")
+    backup_path = backup_root / f"{db_path.stem}-{timestamp}.sqlite3"
+    with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as target:
+        source.backup(target)
+    return {
+        "path": str(backup_path),
+        "created_at": utc_now(),
+        "source": str(db_path),
+        "size_bytes": backup_path.stat().st_size,
+    }
+
+
+def _restore_sqlite_db(db: str | Path, backup_path: str | Path) -> dict[str, Any]:
+    db_path = Path(db).expanduser()
+    backup = Path(backup_path).expanduser()
+    with sqlite3.connect(backup) as source, sqlite3.connect(db_path) as target:
+        source.backup(target)
+    return {
+        "restored_at": utc_now(),
+        "source": str(backup),
+        "target": str(db_path),
+        "size_bytes": db_path.stat().st_size,
+    }
+
+
+def default_migration_command(db: str | Path, *, python_bin: str = sys.executable) -> list[str]:
+    return [
+        python_bin,
+        "-c",
+        "import sys; from github_agent_bridge.queue import JobQueue; JobQueue(sys.argv[1])",
+        str(Path(db).expanduser()),
+    ]
+
+
+def default_version_check_command(*, python_bin: str = sys.executable) -> list[str]:
+    return [python_bin, "-c", "from github_agent_bridge import __version__; print(__version__)"]
+
+
+def _installed_version_from_command(command: Sequence[str], runner: CommandRunner) -> tuple[dict[str, Any], str]:
+    proc = runner(list(command), None)
+    return _command_result("postcheck", command, proc, reason="verify installed package version"), proc.stdout.strip()
+
+
+def _postcheck_update(
+    db: str | Path | None,
+    plan: dict[str, Any],
+    *,
+    systemctl_bin: str,
+    run_systemd: bool,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    checks: dict[str, Any] = {"ok": False, "checks": [], "errors": []}
+    target = plan.get("target") if isinstance(plan.get("target"), dict) else {}
+    target_tag = str(target.get("tag_name") or "")
+    expected_version = target_tag.lstrip("v")
+
+    command = default_version_check_command()
+    version_check, installed_version = _installed_version_from_command(command, runner)
+    version_check["name"] = "installed_version"
+    version_check["expected"] = expected_version
+    version_check["actual"] = installed_version
+    version_check["ok"] = version_check["returncode"] == 0 and (not expected_version or installed_version == expected_version)
+    checks["checks"].append(version_check)
+    if not version_check["ok"]:
+        checks["errors"].append("installed_version_mismatch")
+
+    if db is not None:
+        queue_counts = active_queue_counts(JobQueue(db))
+        queue_check = {
+            "kind": "postcheck",
+            "name": "queue_state",
+            "status": "succeeded",
+            "active_counts": queue_counts,
+            "active_total": sum(queue_counts.values()),
+            "ok": True,
+        }
+        checks["checks"].append(queue_check)
+
+    if run_systemd:
+        service_plan = plan.get("service_plan") if isinstance(plan.get("service_plan"), dict) else {}
+        units = [
+            str(action.get("unit") or "")
+            for action in service_plan.get("immediate") or []
+            if action.get("unit") and action.get("unit") != "--user"
+        ]
+        for unit in dict.fromkeys(units):
+            command = [systemctl_bin, "--user", "is-active", unit]
+            proc = runner(command, None)
+            check = _command_result("postcheck", command, proc, unit=unit, reason="verify service is active")
+            check["name"] = "systemd_active"
+            check["ok"] = proc.returncode == 0 and proc.stdout.strip() == "active"
+            checks["checks"].append(check)
+            if not check["ok"]:
+                checks["errors"].append(f"service_not_active:{unit}")
+
+    checks["ok"] = not checks["errors"]
+    return checks
+
+
+def _record_degraded_update_state(
+    db: str | Path | None,
+    plan: dict[str, Any],
+    *,
+    migration: dict[str, Any] | None,
+    execution: dict[str, Any],
+    degraded: bool = True,
+) -> None:
+    if db is None:
+        return
+    state = record_update_plan(db, plan)
+    now = utc_now()
+    state.update(
+        {
+            "updated_at": now,
+            "degraded": degraded,
+            "blocked_reason": execution["blocked"][-1] if execution["blocked"] else "autoupdate_apply_failed",
+            "migration": migration or {},
+            "execution": {
+                "commands": execution.get("commands", []),
+                "blocked": execution.get("blocked", []),
+                "updated_at": now,
+            },
+        }
+    )
+    save_update_state(JobQueue(db), state)
+
+
 def apply_update_plan(
     plan: dict[str, Any],
     *,
+    db: str | Path | None = None,
     repo: str = "pilipilisbot/github-agent-bridge",
+    backup_dir: str | Path | None = None,
     install_command: Sequence[str] | None = None,
+    migration_command: Sequence[str] | None = None,
     systemctl_bin: str = "systemctl",
     run_install: bool = True,
+    run_migrations: bool = True,
     run_systemd: bool = True,
+    run_postchecks: bool = True,
     runner: CommandRunner = _default_runner,
 ) -> dict[str, Any]:
     """Execute the safe, immediate subset described by an update plan."""
@@ -269,6 +407,8 @@ def apply_update_plan(
         "applied": False,
         "blocked": [],
         "commands": [],
+        "migration": {},
+        "postcheck": {},
     }
 
     if plan.get("decision") == "noop" or plan.get("up_to_date"):
@@ -277,22 +417,90 @@ def apply_update_plan(
     if not target_tag:
         result["blocked"].append("missing_target_tag")
         return result
-    if classification.get("migration_files"):
-        result["blocked"].append("migration_execution_not_supported")
+    migration_files = list(classification.get("migration_files") or [])
+    migration_state: dict[str, Any] = {}
+    queue_info = plan.get("queue") if isinstance(plan.get("queue"), dict) else {}
+    active_total = int(queue_info.get("active_total") or 0)
+    if migration_files and active_total:
+        result["blocked"].append("active_jobs_block_migration")
+        _record_degraded_update_state(db, plan, migration={"required": True, "files": migration_files, "status": "deferred"}, execution=result, degraded=False)
         return result
+    if migration_files and db is None:
+        result["blocked"].append("missing_db_for_migration")
+        return result
+
+    if migration_files:
+        migration_state = {
+            "required": True,
+            "files": migration_files,
+            "status": "backup_pending",
+            "started_at": utc_now(),
+        }
+        result["migration"] = migration_state
+        try:
+            migration_state["backup"] = _backup_sqlite_db(db, backup_dir)
+        except sqlite3.Error as exc:
+            migration_state["status"] = "backup_failed"
+            migration_state["error"] = str(exc)
+            result["blocked"].append("migration_backup_failed")
+            _record_degraded_update_state(db, plan, migration=migration_state, execution=result)
+            return result
+        migration_state["status"] = "backup_complete"
 
     if run_install:
         command = list(install_command or default_install_command(repo, target_tag))
         proc = runner(command, None)
         result["commands"].append(_command_result("install", command, proc, reason=f"install {target_tag}"))
         if proc.returncode != 0:
+            if migration_state:
+                migration_state["status"] = "install_failed_after_backup"
+                _record_degraded_update_state(db, plan, migration=migration_state, execution=result)
             return result
+
+    if migration_files and run_migrations:
+        migration_state["status"] = "applying"
+        command = list(migration_command or default_migration_command(db))
+        proc = runner(command, None)
+        result["commands"].append(_command_result("migration", command, proc, reason="apply packaged SQLite schema"))
+        if proc.returncode != 0:
+            migration_state["status"] = "failed"
+            migration_state["error"] = proc.stderr.strip() or proc.stdout.strip()
+            backup = migration_state.get("backup") if isinstance(migration_state.get("backup"), dict) else {}
+            backup_path = str(backup.get("path") or "")
+            if backup_path:
+                try:
+                    migration_state["rollback"] = _restore_sqlite_db(db, backup_path)
+                    migration_state["status"] = "rolled_back"
+                except sqlite3.Error as exc:
+                    migration_state["rollback_error"] = str(exc)
+            result["blocked"].append("migration_apply_failed")
+            _record_degraded_update_state(db, plan, migration=migration_state, execution=result)
+            return result
+        migration_state["status"] = "applied"
+        migration_state["applied_at"] = utc_now()
 
     if run_systemd:
         service_plan = plan.get("service_plan") if isinstance(plan.get("service_plan"), dict) else {}
         if not _run_systemd_actions(service_plan.get("immediate") or [], result, systemctl_bin=systemctl_bin, runner=runner):
+            _record_degraded_update_state(db, plan, migration=migration_state, execution=result)
             return result
 
+    if run_postchecks:
+        result["postcheck"] = _postcheck_update(
+            db,
+            plan,
+            systemctl_bin=systemctl_bin,
+            run_systemd=run_systemd,
+            runner=runner,
+        )
+        if not result["postcheck"].get("ok"):
+            result["blocked"].append("postcheck_failed")
+            _record_degraded_update_state(db, plan, migration=migration_state, execution=result)
+            return result
+
+    if migration_state:
+        migration_state["status"] = "complete"
+        migration_state["completed_at"] = utc_now()
     result["applied"] = True
     return result
 
@@ -486,9 +694,9 @@ def record_update_plan(db: str | Path, plan: dict[str, Any]) -> dict[str, Any]:
         "installed_tag": plan["installed_tag"],
         "target": plan["target"],
         "decision": plan["decision"],
-        "executor_reload_pending": bool(plan["executor_reload_pending"]),
-        "blocked_reason": plan["blocked_reason"],
-        "queue": plan["queue"],
+        "executor_reload_pending": bool(plan.get("executor_reload_pending")),
+        "blocked_reason": plan.get("blocked_reason", ""),
+        "queue": plan.get("queue", {}),
         "classification": {
             "risk": plan["classification"]["risk"],
             "migration_files": plan["classification"]["migration_files"],
@@ -496,7 +704,7 @@ def record_update_plan(db: str | Path, plan: dict[str, Any]) -> dict[str, Any]:
             "systemd_files": plan["classification"].get("systemd_files", []),
         },
         "service_plan": plan.get("service_plan", {}),
-        "warnings": plan["warnings"],
+        "warnings": plan.get("warnings", []),
     }
     save_update_state(queue, state)
     return state
