@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.44.2 (2026-06-17)
+
+### Bug Fixes
+
+- Avoid ambiguous review comment fallback
+  ([`0bcd1bc`](https://github.com/pilipilisbot/github-agent-bridge/commit/0bcd1bc4ac424f42b6d1924fd8db6d067334101c))
+
+- Resolve feedback review comments
+  ([`befc1a1`](https://github.com/pilipilisbot/github-agent-bridge/commit/befc1a11a4dd76a523f7cc2f5d249e5564ef1c64))
+
+
 ## v0.44.1 (2026-06-17)
 
 ### Bug Fixes
