@@ -512,21 +512,11 @@ class OpenClawDispatcher:
     def feedback_rules_context(self, repo: str, min_confidence: float) -> str:
         if not self.feedback_db_path:
             return "No bridge database was provided, so no curated feedback rules were loaded."
-        scope = f"repo:{repo}"
         try:
-            rules = feedback.list_rules(self.feedback_db_path, scope=scope, min_confidence=min_confidence)
+            rules = feedback.list_applicable_rules(self.feedback_db_path, repo=repo, min_confidence=min_confidence)
         except Exception as exc:
             return f"Could not load curated feedback rules from the bridge database: {exc}"
-        if not rules:
-            return f"No curated feedback rules matched {scope} at confidence >= {min_confidence}."
-        lines = []
-        for rule in rules:
-            lines.append(
-                f"- [{rule['scope']}] {rule['type']} "
-                f"(confidence {rule['confidence']:.2f}, observations {rule['observations']}): "
-                f"{rule['rule']}"
-            )
-        return "\n".join(lines)
+        return feedback.format_rules_context(repo, min_confidence, rules)
 
     def route_for(self, job: Job, policy: Policy) -> tuple[str | None, str, str]:
         route: Route = policy.route_for(job.repo)

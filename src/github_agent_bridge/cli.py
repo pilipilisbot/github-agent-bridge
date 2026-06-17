@@ -15,7 +15,7 @@ from . import feedback
 from .actors import backfill_trigger_actors
 from .autoupdate import apply_update_plan, complete_pending_reload, plan_update, record_update_plan
 from .dashboard_data import inspect_db_read_only, list_jobs
-from .dispatch import GitHubClient, OpenClawDispatcher, RunMode
+from .dispatch import FEEDBACK_LEARNING_RULES, GitHubClient, OpenClawDispatcher, RunMode, prompt_rule
 from .executor import ExecutorConfig, ExecutorPool
 from .models import Notification, utc_now
 from .monitor import MonitorThresholds, monitor, report_json
@@ -291,6 +291,16 @@ def cmd_feedback_rules(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rules(args: argparse.Namespace) -> int:
+    policy = load_policy(args.policy)
+    min_confidence = args.min_confidence if args.min_confidence is not None else policy.feedback_learning.min_confidence
+    rules = feedback.list_applicable_rules(args.db, repo=args.repo, min_confidence=min_confidence)
+    context = feedback.format_rules_context(args.repo, min_confidence, rules)
+    template = prompt_rule("feedback_learning", FEEDBACK_LEARNING_RULES, policy)
+    print(template.format(repo=args.repo.strip().lower(), min_confidence=min_confidence, rules=context), end="")
+    return 0
+
+
 def cmd_feedback_events(args: argparse.Namespace) -> int:
     print(json.dumps({"events": feedback.list_events(args.db, args.scope, args.limit)}, ensure_ascii=False, indent=2))
     return 0
@@ -422,6 +432,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--scope", default="", help="filter by exact scope or scope prefix, e.g. repo:owner/name")
     s.add_argument("--min-confidence", type=float, default=None)
     s.set_defaults(func=cmd_feedback_rules)
+    s = sub.add_parser("rules", help="render curated rules for a repository as prompt text")
+    s.add_argument("--repo", required=True, help="repository name, e.g. owner/name")
+    s.add_argument("--min-confidence", type=float, default=None, help="override policy feedbackLearning.minConfidence")
+    s.set_defaults(func=cmd_rules)
     s = sub.add_parser("feedback-events", help="list captured feedback candidates")
     s.add_argument("--scope", default="", help="filter by exact scope or scope prefix, e.g. repo:owner/name")
     s.add_argument("--limit", type=int, default=20)

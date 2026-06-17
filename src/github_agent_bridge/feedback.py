@@ -750,6 +750,65 @@ def list_rules(db_path: str | Path, scope: str = "", min_confidence: float | Non
         ]
 
 
+def rule_scopes_for_repo(repo: str) -> list[str]:
+    normalized = (repo or "").strip().lower()
+    if "/" not in normalized:
+        return ["global"]
+    owner, name = [part.strip() for part in normalized.split("/", 1)]
+    if not owner or not name:
+        return ["global"]
+    return ["global", f"org:{owner}", f"repo:{owner}/{name}"]
+
+
+def list_applicable_rules(db_path: str | Path, repo: str, min_confidence: float | None = None) -> list[dict[str, Any]]:
+    scopes = rule_scopes_for_repo(repo)
+    clauses = []
+    args: list[Any] = []
+    scope_clauses = []
+    for scope in scopes:
+        scope_clauses.append("(scope=? OR scope LIKE ?)")
+        args.extend([scope, f"{scope}:%"])
+    if scope_clauses:
+        clauses.append("(" + " OR ".join(scope_clauses) + ")")
+    if min_confidence is not None:
+        clauses.append("confidence>=?")
+        args.append(min_confidence)
+    sql = "SELECT * FROM feedback_rules"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY last_seen DESC, created_at DESC, scope ASC, type ASC, rule ASC"
+    with _connect(db_path) as con:
+        return [
+            {
+                "id": row["id"],
+                "scope": row["scope"],
+                "type": row["type"],
+                "confidence": row["confidence"],
+                "rule": row["rule"],
+                "created_at": row["created_at"],
+                "last_seen": row["last_seen"],
+                "source_events": json.loads(row["source_events_json"] or "[]"),
+                "source_event_details": _source_event_details(con, json.loads(row["source_events_json"] or "[]")),
+                "observations": row["observations"],
+            }
+            for row in con.execute(sql, args)
+        ]
+
+
+def format_rules_context(repo: str, min_confidence: float, rules: list[dict[str, Any]]) -> str:
+    scope = f"repo:{(repo or 'unknown/repo').strip().lower()}"
+    if not rules:
+        return f"No curated feedback rules matched {scope} at confidence >= {min_confidence}."
+    lines = []
+    for rule in rules:
+        lines.append(
+            f"- [{rule['scope']}] {rule['type']} "
+            f"(confidence {rule['confidence']:.2f}, observations {rule['observations']}): "
+            f"{rule['rule']}"
+        )
+    return "\n".join(lines)
+
+
 def _source_event_details(con: sqlite3.Connection, source_events: list[str]) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
     seen: set[str] = set()
