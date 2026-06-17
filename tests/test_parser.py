@@ -58,6 +58,82 @@ def test_workflow_run_failed_is_actionable_without_mention():
     assert classify_work_intent(subject, body) == "work_allowed"
 
 
+def test_merge_event_is_sync_after_merge():
+    subject = "Re: [gisce/erp] Bloquear ejecuciones duplicadas de cron (PR #28088)"
+    body = (
+        "giscebot merged commit into developer. "
+        "https://github.com/gisce/erp/pull/28088#event-26664304395"
+    )
+
+    assert classify_github_action(subject, body) == "sync_after_merge"
+
+
+def test_merge_event_with_commit_sha_is_sync_after_merge():
+    subject = "Re: [gisce/erp] Bloquear ejecuciones duplicadas de cron (PR #28088)"
+    body = (
+        "alice merged commit abcdef1 into main. "
+        "https://github.com/gisce/erp/pull/28088#event-26664304395"
+    )
+
+    assert classify_github_action(subject, body) == "sync_after_merge"
+
+
+def test_merge_message_id_is_sync_after_merge():
+    subject = "Re: [pilipilisbot/github-agent-bridge] feat: isolate sessions (PR #96)"
+    body = "Merged #96 into main. https://github.com/pilipilisbot/github-agent-bridge/pull/96"
+
+    assert (
+        classify_github_action(
+            subject,
+            body,
+            message_id="<pilipilisbot/github-agent-bridge/pull/96/merged@github.com>",
+        )
+        == "sync_after_merge"
+    )
+
+
+def test_sentry_pr_comment_after_merge_is_not_sync_after_merge():
+    subject = "Re: [gisce/erp] Bloquear ejecuciones duplicadas de cron (PR #28088)"
+    body = (
+        "## Issues attributed to commits in this pull request\n"
+        "This pull request was merged and Sentry observed the following issues:\n\n"
+        "* TypeError in staging\n"
+        "https://github.com/gisce/erp/pull/28088#issuecomment-4716515747"
+    )
+
+    assert classify_github_action(subject, body) == "archive_notification"
+
+
+def test_review_requested_event_with_merged_text_is_not_sync_after_merge():
+    subject = "Re: [pilipilisbot/github-agent-bridge] fix: avoid treating merged comments as sync events (PR #129)"
+    body = (
+        "avoid classifying ordinary comments on merged PRs as sync_after_merge events\n"
+        "https://github.com/pilipilisbot/github-agent-bridge/pull/129"
+    )
+
+    assert (
+        classify_github_action(
+            subject,
+            body,
+            message_id="<pilipilisbot/github-agent-bridge/pull/129/issue_event/1@github.com>",
+        )
+        == "archive_notification"
+    )
+
+
+def test_post_merge_cleanup_comment_is_not_sync_after_merge():
+    subject = "Re: [pilipilisbot/github-agent-bridge] fix: avoid treating merged comments as sync events (PR #129)"
+    body = (
+        "Post-merge cleanup check completed for the routed sync_after_merge job.\n\n"
+        "No workspace cleanup was performed because GitHub currently reports this PR as open "
+        "(merged=false, merged_at=null), and the triggering timeline event is review_requested "
+        "rather than a merge.\n"
+        "https://github.com/pilipilisbot/github-agent-bridge/pull/129#issuecomment-4729705613"
+    )
+
+    assert classify_github_action(subject, body) == "archive_notification"
+
+
 def test_copilot_comment_is_actionable():
     assert classify_github_action("Re: [x] PR", "@Copilot commented on this pull request.") == "reply_comment"
 

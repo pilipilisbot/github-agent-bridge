@@ -431,7 +431,7 @@ Supported action names currently produced by the parser:
 | Action | Produced when | Typical meaning |
 | --- | --- | --- |
 | `archive_notification` | Notification is routine and does not mention/assign/request the bot. | Persist as handled without agent work. |
-| `sync_after_merge` | Notification text contains `merged`. | Dispatch trusted post-merge workspace cleanup to the agent. |
+| `sync_after_merge` | GitHub sends an explicit merge notification, either via a `/merged@github.com` message id or a PR timeline `#event-...` URL whose text matches a merge event. | Dispatch trusted post-merge workspace cleanup to the agent. |
 | `workflow_run_failed` | Notification text contains a GitHub Actions run URL and a failure marker such as `run failed`, `workflow failed`, or `job failed`. | Dispatch trusted CI failure investigation to the agent. |
 | `submit_review` | GitHub requested a review from the bot. | React 👀 and dispatch review-only work that must end with a formal PR review verdict. |
 | `reply_comment` | Bot mentioned, Copilot review, or PR review/comment notification. | React 👀 and dispatch agent work/reply. |
