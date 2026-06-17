@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.44.1 (2026-06-17)
+
+### Bug Fixes
+
+- Avoid treating merged comments as sync events
+  ([`4f8b94f`](https://github.com/pilipilisbot/github-agent-bridge/commit/4f8b94fc60946c18fe5e47ec80d3f6ee8e567875))
+
+
 ## v0.44.0 (2026-06-17)
 
 ### Features
