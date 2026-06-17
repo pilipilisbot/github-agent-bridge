@@ -112,6 +112,23 @@ def test_build_prompt_inlines_curated_feedback_rules(tmp_path):
     assert "feedback-rules --scope" not in prompt
 
 
+def test_build_prompt_inlines_global_org_and_repo_feedback_rules(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    feedback.add_rule(db, "global", "operating_rule", "Global bridge rule.", 0.84)
+    feedback.add_rule(db, "org:gisce", "style_preference", "Org bridge rule.", 0.84)
+    feedback.add_rule(db, "repo:gisce/erp", "technical_criterion", "Repo bridge rule.", 0.84)
+
+    prompt = OpenClawDispatcher(mode="shadow", feedback_db_path=str(db)).build_prompt(
+        make_job("review_only"),
+        Policy(feedback_learning=FeedbackLearning(min_confidence=0.8)),
+    )
+
+    assert "[global] operating_rule (confidence 0.84, observations 1): Global bridge rule." in prompt
+    assert "[org:gisce] style_preference (confidence 0.84, observations 1): Org bridge rule." in prompt
+    assert "[repo:gisce/erp] technical_criterion (confidence 0.84, observations 1): Repo bridge rule." in prompt
+
+
 def test_role_prompt_markdown_files_are_packaged_resources():
     package = resources.files("github_agent_bridge.prompt_rules").joinpath("roles")
     expected = {"owner.md", "maintainer.md", "contributor.md", "reviewer.md"}

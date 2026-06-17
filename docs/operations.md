@@ -469,6 +469,19 @@ gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
   feedback-rules --scope repo:owner/name --min-confidence 0.5
 ```
 
+To inject the same curated rules into a non-bridge agent workflow, render them
+as prompt text:
+
+```bash
+gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
+  --policy ~/.config/github-agent-bridge/policy.json \
+  rules --repo owner/name
+```
+
+The `rules` command uses the policy `feedbackLearning.minConfidence` threshold
+unless `--min-confidence` is provided, and it includes matching `global`,
+`org:owner`, and `repo:owner/name` rules.
+
 Capture is controlled by `policy.json` `feedbackLearning.enabled`; the prompt
 threshold comes from `feedbackLearning.minConfidence`.
 

@@ -236,6 +236,20 @@ def test_list_rules_orders_newest_seen_first(tmp_path):
     assert [rule["id"] for rule in rules] == ["same-last-seen-newer-created", "newer", "older"]
 
 
+def test_list_applicable_rules_includes_global_org_and_repo_scopes(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    feedback.add_rule(db, "global", "operating_rule", "Global rule.", 0.9)
+    feedback.add_rule(db, "org:gisce", "style_preference", "Org rule.", 0.9)
+    feedback.add_rule(db, "repo:gisce/erp", "technical_criterion", "Repo rule.", 0.9)
+    feedback.add_rule(db, "repo:other/project", "technical_criterion", "Other rule.", 0.9)
+    feedback.add_rule(db, "repo:gisce/erp", "technical_criterion", "Low confidence rule.", 0.4)
+
+    rules = feedback.list_applicable_rules(db, "gisce/erp", min_confidence=0.5)
+
+    assert {rule["rule"] for rule in rules} == {"Global rule.", "Org rule.", "Repo rule."}
+
+
 def test_add_rule_rejects_invalid_confidence(tmp_path):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)
