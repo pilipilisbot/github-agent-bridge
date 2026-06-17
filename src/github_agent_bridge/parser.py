@@ -13,6 +13,7 @@ ASSIGNMENT_PATTERNS = ("assigned you", "assigned to you", "you were assigned", "
 REVIEW_REQUEST_PATTERNS = ("requested your review", "requested a review from you", "you were requested for review", "review requested")
 COPILOT_REVIEW_PATTERNS = ("copilot-pull-request-reviewer", "github-copilot", "github copilot", "copilot reviewed", "copilot commented", "copilot left a comment", "copilot suggested", "copilot requested changes")
 WORKFLOW_RUN_FAILED_PATTERNS = ("run failed", "workflow run failed", "workflow failed", "job failed", "failing after")
+MERGE_EVENT_RE = re.compile(r"\b[\w.-]+\s+merged\s+(?:commit(?:\s+[0-9a-f]{7,40})?|[0-9a-f]{7,40}|#\d+)\s+(?:into|to)\s+[\w./-]+\b")
 
 
 def decode_header_value(value: str | None) -> str:
@@ -94,12 +95,30 @@ def classify_work_intent(subject: str, body: str, bot_logins: set[str] | None = 
     return "work_allowed"
 
 
-def classify_github_action(subject: str, body: str, bot_logins: set[str] | None = None) -> str:
+def _is_merge_notification(text: str, ctx: GitHubContext, message_id: str | None) -> bool:
+    if "merged" not in text:
+        return False
+    normalized_message_id = (message_id or "").lower()
+    if "/merged@" in normalized_message_id:
+        return True
+    if ctx.target_kind != "issue":
+        return False
+    return any("#event-" in url for url in ctx.urls) and bool(MERGE_EVENT_RE.search(text))
+
+
+def classify_github_action(
+    subject: str,
+    body: str,
+    bot_logins: set[str] | None = None,
+    *,
+    message_id: str | None = None,
+) -> str:
     text = f"{subject}\n{body}".lower()
     flags = github_event_flags(subject, body, bot_logins)
+    ctx = extract_github_context(body)
     if re.search(r"github\.com/[^/]+/[^/]+/actions/runs/\d+", text) and _contains_any(text, WORKFLOW_RUN_FAILED_PATTERNS):
         return "workflow_run_failed"
-    if "merged" in text:
+    if _is_merge_notification(text, ctx, message_id):
         return "sync_after_merge"
     # PR reviews/comments should be handled as replies even when GitHub's footer
     # also says the bot was assigned to the thread.
