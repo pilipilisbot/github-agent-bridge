@@ -499,6 +499,49 @@ def test_react_to_feedback_comment_resolves_review_comment(monkeypatch):
     assert calls[-1][4] == "repos/gisce/erp/pulls/comments/123/reactions"
 
 
+def test_react_to_feedback_comment_does_not_guess_review_comment(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        result = Result()
+        if cmd[2] == "repos/gisce/erp/pulls/1/reviews/99/comments":
+            result.stdout = (
+                '[{"id":123,"html_url":"https://github.com/gisce/erp/pull/1#discussion_r123",'
+                '"body":"Move this setting into FeatureFlags."},'
+                '{"id":124,"html_url":"https://github.com/gisce/erp/pull/1#discussion_r124",'
+                '"body":"Add a regression test."}]'
+            )
+        return result
+
+    monkeypatch.setattr(feedback.subprocess, "run", fake_run)
+    event = {
+        "comment": "Re: [gisce/erp] PR\n\nSummary text only.\n"
+        "https://github.com/gisce/erp/pull/1#pullrequestreview-99",
+        "github_context": {
+            "urls": ["https://github.com/gisce/erp/pull/1#pullrequestreview-99"],
+            "repo": "gisce/erp",
+            "issue_number": 1,
+            "comment_id": None,
+            "review_id": 99,
+            "review_comment_id": None,
+            "commit_comment_id": None,
+            "commit_sha": None,
+            "target_kind": "review",
+            "workflow_run_id": None,
+        },
+    }
+
+    assert feedback.react_to_feedback_comment(event, gh_bin="gh") is False
+    assert len(calls) == 1
+
+
 def test_persist_resolved_review_comment_source_updates_event_context(tmp_path, monkeypatch):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)
@@ -531,6 +574,39 @@ def test_persist_resolved_review_comment_source_updates_event_context(tmp_path, 
     assert updated["source_url"] == "https://github.com/gisce/erp/pull/1#discussion_r123"
     assert updated["github_context"]["review_comment_id"] == 123
     assert feedback.list_events(db, "repo:gisce/erp")[0]["source_url"] == "https://github.com/gisce/erp/pull/1#discussion_r123"
+
+
+def test_persist_resolved_review_comment_source_keeps_review_source_when_no_match(tmp_path, monkeypatch):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    review_url = "https://github.com/gisce/erp/pull/1#pullrequestreview-99"
+    ctx = GitHubContext([review_url], "gisce/erp", 1, review_id=99, target_kind="review")
+    n = notification(f"Review summary only. {review_url}")
+    feedback.capture_feedback(db, n, ctx, "reply_comment", "auto_trusted", "work_allowed")
+    event = feedback.list_events(db, "repo:gisce/erp")[0]
+
+    def fake_run(cmd, **kwargs):
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = (
+                '[{"id":123,"html_url":"https://github.com/gisce/erp/pull/1#discussion_r123",'
+                '"body":"Move this setting into FeatureFlags."},'
+                '{"id":124,"html_url":"https://github.com/gisce/erp/pull/1#discussion_r124",'
+                '"body":"Add a regression test."}]'
+            )
+
+        return Result()
+
+    monkeypatch.setattr(feedback.subprocess, "run", fake_run)
+
+    updated = feedback.persist_resolved_review_comment_source(db, event, gh_bin="gh")
+
+    assert updated["source_url"] == review_url
+    assert updated["github_context"]["review_comment_id"] is None
+    stored = feedback.list_events(db, "repo:gisce/erp")[0]
+    assert stored["source_url"] == review_url
+    assert stored["github_context"]["review_comment_id"] is None
 
 
 def test_learn_from_events_passes_policy_route_agent(tmp_path, monkeypatch):

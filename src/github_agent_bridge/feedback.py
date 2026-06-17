@@ -746,7 +746,7 @@ def _matching_review_comment(ctx: GitHubContext, text: str, gh_bin: str = "gh") 
         normalized_body = re.sub(r"\s+", " ", body).strip().lower()
         if normalized_body and normalized_body in normalized_text:
             return comment
-    return candidates[0]
+    return None
 
 
 def _context_with_review_comment(ctx: GitHubContext, comment: dict[str, Any]) -> GitHubContext | None:
