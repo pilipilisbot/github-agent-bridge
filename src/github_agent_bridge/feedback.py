@@ -412,7 +412,11 @@ def reaction_endpoint(ctx: GitHubContext) -> str | None:
 
 
 def react_to_feedback_comment(event: dict[str, Any], gh_bin: str = "gh") -> bool:
-    ctx = extract_github_context(str(event.get("comment") or ""))
+    ctx = _github_context_from_event(event)
+    if ctx.review_id and not ctx.review_comment_id:
+        resolved = resolve_review_comment_source(event, gh_bin=gh_bin)
+        if resolved:
+            ctx = resolved
     endpoint = reaction_endpoint(ctx)
     if not endpoint:
         return False
@@ -466,6 +470,7 @@ def learn_from_events(
     reacted = 0
     for event in events:
         try:
+            event = persist_resolved_review_comment_source(db_path, event, gh_bin=gh_bin)
             agent = route_agent_for_event(event, policy)
             event_session_id = session_id_for_event(session_id, agent, event["id"])
             model_used = model
@@ -690,6 +695,121 @@ def _first_value(*values: Any) -> Any:
         if value not in (None, "", []):
             return value
     return None
+
+
+def _github_context_from_event(event: dict[str, Any]) -> GitHubContext:
+    context = event.get("context") if isinstance(event.get("context"), dict) else {}
+    github_context = event.get("github_context")
+    if not isinstance(github_context, dict):
+        github_context = context.get("github_context")
+    if isinstance(github_context, dict):
+        try:
+            return GitHubContext.from_json(json.dumps(github_context))
+        except (TypeError, ValueError):
+            pass
+    return extract_github_context(str(event.get("comment") or ""))
+
+
+def _review_comment_candidates(ctx: GitHubContext, gh_bin: str = "gh") -> list[dict[str, Any]]:
+    if not (ctx.repo and ctx.issue_number and ctx.review_id):
+        return []
+    try:
+        result = subprocess.run(
+            [
+                gh_bin,
+                "api",
+                f"repos/{ctx.repo}/pulls/{ctx.issue_number}/reviews/{ctx.review_id}/comments",
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError:
+        return []
+    if result.returncode != 0:
+        return []
+    try:
+        comments = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [item for item in comments if isinstance(item, dict)]
+
+
+def _matching_review_comment(ctx: GitHubContext, text: str, gh_bin: str = "gh") -> dict[str, Any] | None:
+    normalized_text = re.sub(r"\s+", " ", text).strip().lower()
+    candidates = _review_comment_candidates(ctx, gh_bin=gh_bin)
+    if not candidates:
+        return None
+    for comment in candidates:
+        body = str(comment.get("body") or "")
+        normalized_body = re.sub(r"\s+", " ", body).strip().lower()
+        if normalized_body and normalized_body in normalized_text:
+            return comment
+    return None
+
+
+def _context_with_review_comment(ctx: GitHubContext, comment: dict[str, Any]) -> GitHubContext | None:
+    try:
+        review_comment_id = int(comment["id"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    html_url = str(comment.get("html_url") or "").strip()
+    urls = [html_url, *[url for url in ctx.urls if url != html_url]] if html_url else ctx.urls
+    return GitHubContext(
+        urls=urls,
+        repo=ctx.repo,
+        issue_number=ctx.issue_number,
+        comment_id=ctx.comment_id,
+        review_id=ctx.review_id,
+        review_comment_id=review_comment_id,
+        commit_comment_id=ctx.commit_comment_id,
+        commit_sha=ctx.commit_sha,
+        target_kind="review_comment",
+        workflow_run_id=ctx.workflow_run_id,
+    )
+
+
+def resolve_review_comment_source(event: dict[str, Any], gh_bin: str = "gh") -> GitHubContext | None:
+    ctx = _github_context_from_event(event)
+    if ctx.review_comment_id or not ctx.review_id:
+        return None
+    comment = _matching_review_comment(ctx, str(event.get("comment") or ""), gh_bin=gh_bin)
+    return _context_with_review_comment(ctx, comment) if comment else None
+
+
+def persist_resolved_review_comment_source(db_path: str | Path, event: dict[str, Any], gh_bin: str = "gh") -> dict[str, Any]:
+    resolved = resolve_review_comment_source(event, gh_bin=gh_bin)
+    if not resolved:
+        return event
+    source_url = resolved.short_url
+    with _connect(db_path) as con:
+        row = con.execute("SELECT context_json FROM feedback_events WHERE id=?", (event["id"],)).fetchone()
+        if not row:
+            return event
+        context = _safe_json_object(row["context_json"])
+        github_context = _safe_json_object(resolved.to_json())
+        context["github_context"] = github_context
+        context["github_urls"] = resolved.urls
+        context["source_url"] = source_url
+        con.execute(
+            "UPDATE feedback_events SET context_json=? WHERE id=?",
+            (json.dumps(context, ensure_ascii=False, sort_keys=True), event["id"]),
+        )
+    enriched = {
+        **event,
+        "github_context": _safe_json_object(resolved.to_json()),
+        "github_urls": resolved.urls,
+        "source_url": source_url,
+    }
+    if isinstance(enriched.get("context"), dict):
+        enriched["context"] = {
+            **enriched["context"],
+            "github_context": enriched["github_context"],
+            "github_urls": resolved.urls,
+            "source_url": source_url,
+        }
+    return enriched
 
 
 def _enrich_event(con: sqlite3.Connection, event: dict[str, Any]) -> dict[str, Any]:
