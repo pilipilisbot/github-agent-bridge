@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.44.0 (2026-06-17)
+
+### Features
+
+- Render repository rules for external agents
+  ([`9905ad1`](https://github.com/pilipilisbot/github-agent-bridge/commit/9905ad12e0d1fed1d6b1de2d5152f84461e03593))
+
+
 ## v0.43.0 (2026-06-15)
 
 ### Features
