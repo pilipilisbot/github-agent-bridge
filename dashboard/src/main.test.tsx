@@ -821,7 +821,7 @@ describe("knowledge proposals", () => {
     expect(screen.getByText("pilipilisbot/github-agent-bridge/issues/73#issuecomment-1")).toBeInTheDocument();
   });
 
-  it("allows admins to change curated rule scope", async () => {
+  it("lets admins edit curated rule scope only after entering edit mode", async () => {
     const user = userEvent.setup();
     const onUpdateRuleScope = vi.fn().mockResolvedValue(undefined);
     const rules = [
@@ -850,6 +850,7 @@ describe("knowledge proposals", () => {
       />,
     );
     expect(screen.queryByLabelText("Scope")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
 
     rerender(
       <KnowledgeRules
@@ -861,9 +862,48 @@ describe("knowledge proposals", () => {
         onDeleteRule={vi.fn()}
       />,
     );
+    expect(screen.queryByLabelText("Scope")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
     await user.selectOptions(screen.getByLabelText("Scope"), "global");
+    await user.click(screen.getByRole("button", { name: /save/i }));
 
     expect(onUpdateRuleScope).toHaveBeenCalledWith("rule-1", "global");
+  });
+
+  it("cancels curated rule scope edits without saving", async () => {
+    const user = userEvent.setup();
+    const onUpdateRuleScope = vi.fn().mockResolvedValue(undefined);
+    render(
+      <KnowledgeRules
+        rules={[
+          {
+            id: "rule-1",
+            scope: "repo:pilipilisbot/github-agent-bridge",
+            type: "style_preference",
+            rule: "Keep rule rows compact.",
+            confidence: 0.82,
+            observations: 2,
+            source_events: [],
+            created_at: "2026-06-04T10:00:00Z",
+            last_seen: "2026-06-04T10:01:00Z",
+            source_event_details: [],
+          },
+        ]}
+        loading={false}
+        isAdmin={true}
+        now={Date.parse("2026-06-04T10:02:00Z")}
+        onUpdateRuleScope={onUpdateRuleScope}
+        onDeleteRule={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.selectOptions(screen.getByLabelText("Scope"), "global");
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(screen.queryByLabelText("Scope")).not.toBeInTheDocument();
+    expect(onUpdateRuleScope).not.toHaveBeenCalled();
   });
 
   it("shows moderation actions only to admins for proposed rules", async () => {
