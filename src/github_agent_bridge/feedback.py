@@ -399,6 +399,62 @@ def delete_rule(db_path: str | Path, rule_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def validate_rule_scope(scope: str) -> str:
+    normalized = (scope or "").strip().lower()
+    if normalized == "global":
+        return normalized
+    if normalized.startswith("org:"):
+        org = normalized.removeprefix("org:").strip()
+        if org and "/" not in org:
+            return f"org:{org}"
+    if normalized.startswith("repo:"):
+        repo = normalized.removeprefix("repo:").strip()
+        if repo.count("/") == 1 and all(part.strip() for part in repo.split("/", 1)):
+            return f"repo:{repo}"
+    raise ValueError("scope must be global, org:<owner>, or repo:<owner>/<name>")
+
+
+def update_rule_scope(db_path: str | Path, rule_id: str, scope: str) -> dict[str, Any] | None:
+    new_scope = validate_rule_scope(scope)
+    now = utc_now()
+    with _connect(db_path) as con:
+        row = con.execute("SELECT * FROM feedback_rules WHERE id=?", (rule_id,)).fetchone()
+        if not row:
+            return None
+        if row["scope"] == new_scope:
+            return _rule_dict(con, row)
+
+        new_id = canonical_key(new_scope, row["type"], row["rule"])
+        source_events = json.loads(row["source_events_json"] or "[]")
+        existing = con.execute("SELECT * FROM feedback_rules WHERE id=?", (new_id,)).fetchone()
+        if existing and existing["id"] != rule_id:
+            merged_events = sorted(set(json.loads(existing["source_events_json"] or "[]") + source_events))
+            con.execute(
+                """UPDATE feedback_rules
+                SET confidence=?, last_seen=?, source_events_json=?, observations=?
+                WHERE id=?""",
+                (
+                    max(float(existing["confidence"]), float(row["confidence"])),
+                    now,
+                    json.dumps(merged_events, ensure_ascii=False, sort_keys=True),
+                    int(existing["observations"]) + int(row["observations"]),
+                    existing["id"],
+                ),
+            )
+            con.execute("DELETE FROM feedback_rules WHERE id=?", (rule_id,))
+            merged = con.execute("SELECT * FROM feedback_rules WHERE id=?", (new_id,)).fetchone()
+            return _rule_dict(con, merged) if merged else None
+
+        con.execute(
+            """UPDATE feedback_rules
+            SET id=?, scope=?, last_seen=?
+            WHERE id=?""",
+            (new_id, new_scope, now, rule_id),
+        )
+        updated = con.execute("SELECT * FROM feedback_rules WHERE id=?", (new_id,)).fetchone()
+        return _rule_dict(con, updated) if updated else None
+
+
 def reaction_endpoint(ctx: GitHubContext) -> str | None:
     if not ctx.repo:
         return None
@@ -853,21 +909,7 @@ def list_rules(db_path: str | Path, scope: str = "", min_confidence: float | Non
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY last_seen DESC, created_at DESC, scope ASC, type ASC, rule ASC"
     with _connect(db_path) as con:
-        return [
-            {
-                "id": row["id"],
-                "scope": row["scope"],
-                "type": row["type"],
-                "confidence": row["confidence"],
-                "rule": row["rule"],
-                "created_at": row["created_at"],
-                "last_seen": row["last_seen"],
-                "source_events": json.loads(row["source_events_json"] or "[]"),
-                "source_event_details": _source_event_details(con, json.loads(row["source_events_json"] or "[]")),
-                "observations": row["observations"],
-            }
-            for row in con.execute(sql, args)
-        ]
+        return [_rule_dict(con, row) for row in con.execute(sql, args)]
 
 
 def rule_scopes_for_repo(repo: str) -> list[str]:
@@ -898,21 +940,23 @@ def list_applicable_rules(db_path: str | Path, repo: str, min_confidence: float 
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY last_seen DESC, created_at DESC, scope ASC, type ASC, rule ASC"
     with _connect(db_path) as con:
-        return [
-            {
-                "id": row["id"],
-                "scope": row["scope"],
-                "type": row["type"],
-                "confidence": row["confidence"],
-                "rule": row["rule"],
-                "created_at": row["created_at"],
-                "last_seen": row["last_seen"],
-                "source_events": json.loads(row["source_events_json"] or "[]"),
-                "source_event_details": _source_event_details(con, json.loads(row["source_events_json"] or "[]")),
-                "observations": row["observations"],
-            }
-            for row in con.execute(sql, args)
-        ]
+        return [_rule_dict(con, row) for row in con.execute(sql, args)]
+
+
+def _rule_dict(con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    source_events = json.loads(row["source_events_json"] or "[]")
+    return {
+        "id": row["id"],
+        "scope": row["scope"],
+        "type": row["type"],
+        "confidence": row["confidence"],
+        "rule": row["rule"],
+        "created_at": row["created_at"],
+        "last_seen": row["last_seen"],
+        "source_events": source_events,
+        "source_event_details": _source_event_details(con, source_events),
+        "observations": row["observations"],
+    }
 
 
 def format_rules_context(repo: str, min_confidence: float, rules: list[dict[str, Any]]) -> str:

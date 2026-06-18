@@ -66,6 +66,7 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
         "dismiss_job",
         "approve_knowledge_proposal",
         "reject_knowledge_proposal",
+        "update_knowledge_rule_scope",
         "delete_knowledge_rule",
         "view_autoupdate_plan",
         "refresh_autoupdate_plan",
@@ -857,6 +858,27 @@ def test_dashboard_knowledge_lists_and_admin_moderates_feedback(tmp_path):
     assert rules[0]["source_event_details"][0]["source_url"] == "https://github.com/gisce/erp/pull/1#issuecomment-10"
     assert deleted.status_code == 200
     assert client.get("/api/knowledge", params={"repo": "gisce/erp"}).json()["rules"] == []
+
+
+def test_dashboard_admin_can_change_knowledge_rule_scope(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    rule = feedback.add_rule(db, "repo:gisce/erp", "operating_rule", "Keep knowledge management auditable.", 0.8)
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice"}, admin_users={"alice"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
+
+    forbidden = client.patch(f"/api/knowledge/rules/{rule['id']}", json={"scope": "global"})
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"}, is_admin=True)))
+    updated = client.patch(f"/api/knowledge/rules/{rule['id']}", json={"scope": "global"})
+    invalid = client.patch(f"/api/knowledge/rules/{updated.json()['rule']['id']}", json={"scope": "repo:missing-owner"})
+
+    assert forbidden.status_code == 403
+    assert updated.status_code == 200
+    assert updated.json()["rule"]["scope"] == "global"
+    assert client.get("/api/knowledge").json()["rules"][0]["scope"] == "global"
+    assert client.get("/api/knowledge", params={"repo": "gisce/erp"}).json()["rules"][0]["scope"] == "global"
+    assert invalid.status_code == 400
 
 
 def test_dashboard_retry_requires_admin_and_requeues_retryable_job(tmp_path):
