@@ -747,6 +747,15 @@ function App() {
     await api<{ detail: string }>(`/api/knowledge/rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" });
     queryClient.invalidateQueries({ queryKey: ["knowledge"] });
   }, [queryClient]);
+
+  const updateKnowledgeRuleScope = React.useCallback(async (ruleId: string, scope: string) => {
+    await api<{ rule: KnowledgeRule }>(`/api/knowledge/rules/${encodeURIComponent(ruleId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+  }, [queryClient]);
   const runAutoupdateAction = React.useCallback(async (action: "refresh" | "apply" | "complete") => {
     const path = {
       refresh: "/api/autoupdate/refresh",
@@ -875,6 +884,7 @@ function App() {
             onStatusChange={setKnowledgeStatus}
             onApprove={(proposalId) => moderateKnowledgeProposal(proposalId, "approve")}
             onReject={(proposalId) => moderateKnowledgeProposal(proposalId, "reject")}
+            onUpdateRuleScope={updateKnowledgeRuleScope}
             onDeleteRule={deleteKnowledgeRule}
             onRefresh={() => knowledge.refetch()}
           />
@@ -1377,6 +1387,7 @@ function KnowledgePage({
   onStatusChange,
   onApprove,
   onReject,
+  onUpdateRuleScope,
   onDeleteRule,
   onRefresh,
 }: {
@@ -1391,6 +1402,7 @@ function KnowledgePage({
   onStatusChange: (status: string) => void;
   onApprove: (proposalId: string) => Promise<void>;
   onReject: (proposalId: string) => Promise<void>;
+  onUpdateRuleScope: (ruleId: string, scope: string) => Promise<void>;
   onDeleteRule: (ruleId: string) => Promise<void>;
   onRefresh: () => void;
 }) {
@@ -1469,7 +1481,7 @@ function KnowledgePage({
         }
       >
         {activeTab === "proposals" ? <KnowledgeProposals proposals={data?.proposals ?? []} loading={loading} isAdmin={Boolean(user?.is_admin)} now={now} onApprove={onApprove} onReject={onReject} /> : null}
-        {activeTab === "rules" ? <KnowledgeRules rules={data?.rules ?? []} loading={loading} isAdmin={Boolean(user?.is_admin)} now={now} onDeleteRule={onDeleteRule} /> : null}
+        {activeTab === "rules" ? <KnowledgeRules rules={data?.rules ?? []} loading={loading} isAdmin={Boolean(user?.is_admin)} now={now} onUpdateRuleScope={onUpdateRuleScope} onDeleteRule={onDeleteRule} /> : null}
         {activeTab === "events" ? <KnowledgeEvents events={data?.events ?? []} loading={loading} now={now} /> : null}
       </Panel>
     </div>
@@ -1561,7 +1573,37 @@ function KnowledgeSourceEvent({ event }: { event: KnowledgeEvent }) {
   );
 }
 
-function KnowledgeRules({ rules, loading, isAdmin, now, onDeleteRule }: { rules: KnowledgeRule[]; loading: boolean; isAdmin: boolean; now: number; onDeleteRule: (ruleId: string) => Promise<void> }) {
+function knowledgeRuleScopeOptions(scope: string) {
+  const options = [{ value: "global", label: "global" }];
+  if (scope.startsWith("repo:")) {
+    const repo = scope.slice("repo:".length);
+    const [owner, name] = repo.split("/", 2);
+    if (owner && name) {
+      options.push({ value: `org:${owner}`, label: `org:${owner}` });
+      options.push({ value: `repo:${owner}/${name}`, label: `repo:${owner}/${name}` });
+    }
+  } else if (scope.startsWith("org:")) {
+    options.push({ value: scope, label: scope });
+  }
+  if (!options.some((option) => option.value === scope)) options.push({ value: scope, label: scope });
+  return options;
+}
+
+function KnowledgeRules({
+  rules,
+  loading,
+  isAdmin,
+  now,
+  onUpdateRuleScope,
+  onDeleteRule,
+}: {
+  rules: KnowledgeRule[];
+  loading: boolean;
+  isAdmin: boolean;
+  now: number;
+  onUpdateRuleScope: (ruleId: string, scope: string) => Promise<void>;
+  onDeleteRule: (ruleId: string) => Promise<void>;
+}) {
   const [busyId, setBusyId] = React.useState<string | null>(null);
   if (loading && rules.length === 0) return <EmptyState text="Loading curated rules..." />;
   if (rules.length === 0) return <EmptyState text="No curated rules match the current filters." />;
@@ -1572,28 +1614,52 @@ function KnowledgeRules({ rules, loading, isAdmin, now, onDeleteRule }: { rules:
         const primarySource = sources[0];
         const actor = primarySource ? primarySource.trigger_actor || (primarySource.actor !== "github" ? primarySource.actor : null) : null;
         const sourceUrls = sources.flatMap((source) => source.github_urls ?? []);
+        const scopeOptions = knowledgeRuleScopeOptions(rule.scope);
         return (
           <article key={rule.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-white p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <KnowledgeRowHeader scope={rule.scope} type={rule.type} confidence={rule.confidence} status={`${rule.observations} observation${rule.observations === 1 ? "" : "s"}`} timestamp={rule.last_seen} now={now} />
               {isAdmin ? (
-                <button
-                  className="inline-flex h-8 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
-                  type="button"
-                  disabled={busyId === rule.id}
-                  onClick={async () => {
-                    if (!window.confirm("Delete this curated rule?")) return;
-                    setBusyId(rule.id);
-                    try {
-                      await onDeleteRule(rule.id);
-                    } finally {
-                      setBusyId(null);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                  Delete
-                </button>
+                <div className="flex flex-wrap items-end gap-2">
+                  <Field label="Scope">
+                    <select
+                      className="control h-8 min-w-[180px] py-1 text-xs"
+                      value={rule.scope}
+                      disabled={busyId === rule.id}
+                      onChange={async (event) => {
+                        const nextScope = event.target.value;
+                        if (nextScope === rule.scope) return;
+                        setBusyId(rule.id);
+                        try {
+                          await onUpdateRuleScope(rule.id, nextScope);
+                        } finally {
+                          setBusyId(null);
+                        }
+                      }}
+                    >
+                      {scopeOptions.map((option) => (
+                        <option value={option.value} key={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <button
+                    className="inline-flex h-8 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                    type="button"
+                    disabled={busyId === rule.id}
+                    onClick={async () => {
+                      if (!window.confirm("Delete this curated rule?")) return;
+                      setBusyId(rule.id);
+                      try {
+                        await onDeleteRule(rule.id);
+                      } finally {
+                        setBusyId(null);
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                    Delete
+                  </button>
+                </div>
               ) : null}
             </div>
             <p className="min-w-0 break-words text-sm font-medium [overflow-wrap:anywhere]">{rule.rule}</p>
@@ -2954,6 +3020,7 @@ export {
   UserMenu,
   KnowledgePage,
   KnowledgeProposals,
+  KnowledgeRules,
   buildJobQuery,
   buildKnowledgeQuery,
   changelogMarkdown,

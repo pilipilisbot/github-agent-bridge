@@ -10,6 +10,7 @@ import {
   JobsList,
   KnowledgePage,
   KnowledgeProposals,
+  KnowledgeRules,
   ProductMeta,
   SectionNav,
   StatusBadge,
@@ -795,6 +796,7 @@ describe("knowledge proposals", () => {
         onStatusChange={vi.fn()}
         onApprove={vi.fn()}
         onReject={vi.fn()}
+        onUpdateRuleScope={vi.fn()}
         onDeleteRule={vi.fn()}
         onRefresh={vi.fn()}
       />,
@@ -817,6 +819,51 @@ describe("knowledge proposals", () => {
     expect(screen.getByText("@ecarreras")).toBeInTheDocument();
     expect(screen.getByText("Job #510")).toBeInTheDocument();
     expect(screen.getByText("pilipilisbot/github-agent-bridge/issues/73#issuecomment-1")).toBeInTheDocument();
+  });
+
+  it("allows admins to change curated rule scope", async () => {
+    const user = userEvent.setup();
+    const onUpdateRuleScope = vi.fn().mockResolvedValue(undefined);
+    const rules = [
+      {
+        id: "rule-1",
+        scope: "repo:pilipilisbot/github-agent-bridge",
+        type: "style_preference",
+        rule: "Keep rule rows compact.",
+        confidence: 0.82,
+        observations: 2,
+        source_events: [],
+        created_at: "2026-06-04T10:00:00Z",
+        last_seen: "2026-06-04T10:01:00Z",
+        source_event_details: [],
+      },
+    ];
+
+    const { rerender } = render(
+      <KnowledgeRules
+        rules={rules}
+        loading={false}
+        isAdmin={false}
+        now={Date.parse("2026-06-04T10:02:00Z")}
+        onUpdateRuleScope={onUpdateRuleScope}
+        onDeleteRule={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("Scope")).not.toBeInTheDocument();
+
+    rerender(
+      <KnowledgeRules
+        rules={rules}
+        loading={false}
+        isAdmin={true}
+        now={Date.parse("2026-06-04T10:02:00Z")}
+        onUpdateRuleScope={onUpdateRuleScope}
+        onDeleteRule={vi.fn()}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("Scope"), "global");
+
+    expect(onUpdateRuleScope).toHaveBeenCalledWith("rule-1", "global");
   });
 
   it("shows moderation actions only to admins for proposed rules", async () => {

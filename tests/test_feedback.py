@@ -292,6 +292,24 @@ def test_knowledge_moderation_approves_rejects_and_deletes_rules(tmp_path):
     assert feedback.delete_rule(db, rules[0]["id"]) is False
 
 
+def test_update_rule_scope_moves_and_merges_duplicate_target_rule(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    repo_rule = feedback.add_rule(db, "repo:gisce/erp", "style_preference", "Prefer compact feedback in GitHub follow-ups.", 0.7, ["event-1"])
+    global_rule = feedback.add_rule(db, "global", "style_preference", "Prefer compact feedback in GitHub follow-ups.", 0.9, ["event-2"])
+
+    moved = feedback.update_rule_scope(db, repo_rule["id"], "global")
+    rules = feedback.list_rules(db, min_confidence=0)
+
+    assert moved is not None
+    assert moved["id"] == global_rule["id"]
+    assert moved["scope"] == "global"
+    assert moved["confidence"] == 0.9
+    assert moved["observations"] == 2
+    assert moved["source_events"] == ["event-1", "event-2"]
+    assert [rule["id"] for rule in rules] == [global_rule["id"]]
+
+
 def test_list_proposals_includes_source_event_details(tmp_path):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)

@@ -23,7 +23,17 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .autoupdate import apply_update_plan, complete_pending_reload, load_update_state, plan_update, record_update_plan, save_update_state
 from .cli import DEFAULT_DB
-from .feedback import approve_proposal, delete_rule, list_events, list_proposals, list_repositories, list_rules, reject_proposal
+from .feedback import (
+    approve_proposal,
+    delete_rule,
+    list_applicable_rules,
+    list_events,
+    list_proposals,
+    list_repositories,
+    list_rules,
+    reject_proposal,
+    update_rule_scope,
+)
 from .dashboard_data import (
     get_job_detail,
     inspect_db_read_only,
@@ -429,7 +439,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.get("/api/status")
     def api_status(profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         queue = JobQueue(config.db)
-        admin_actions = ["retry_job", "dismiss_job", "approve_knowledge_proposal", "reject_knowledge_proposal", "delete_knowledge_rule"]
+        admin_actions = ["retry_job", "dismiss_job", "approve_knowledge_proposal", "reject_knowledge_proposal", "update_knowledge_rule_scope", "delete_knowledge_rule"]
         if profile.get("is_admin"):
             admin_actions.extend(["view_autoupdate_plan", "refresh_autoupdate_plan", "apply_autoupdate", "complete_autoupdate_reload"])
         return {
@@ -648,7 +658,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if scope:
             proposals = [item for item in proposals if item["scope"] == scope or item["scope"].startswith(f"{scope}:")]
         events = list_events(config.db, scope=scope, limit=limit)
-        rules = list_rules(config.db, scope=scope, min_confidence=0)
+        rules = list_applicable_rules(config.db, repo.strip().lower(), min_confidence=0) if scope else list_rules(config.db, min_confidence=0)
         return {
             "repositories": list_repositories(config.db),
             "events": events,
@@ -683,6 +693,16 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if not delete_rule(config.db, rule_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
         return {"detail": "knowledge_rule_deleted"}
+
+    @app.patch("/api/knowledge/rules/{rule_id}")
+    def api_knowledge_rule_update(rule_id: str, payload: dict[str, Any], _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        try:
+            rule = update_rule_scope(config.db, rule_id, str(payload.get("scope") or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if rule is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
+        return {"rule": rule, "detail": "knowledge_rule_updated"}
 
     @app.get("/api/events/stream")
     def api_events(_: str = Depends(current_user)) -> Response:
