@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v0.45.0 (2026-06-18)
+
+### Documentation
+
+- Add bridge operations skill
+  ([`d05b146`](https://github.com/pilipilisbot/github-agent-bridge/commit/d05b1460a146bf6d1b6863ef1caea5d7b0709167))
+
+### Features
+
+- Add dashboard rule scope editing
+  ([#136](https://github.com/pilipilisbot/github-agent-bridge/pull/136),
+  [`06325df`](https://github.com/pilipilisbot/github-agent-bridge/commit/06325df73c21e1d0073caae33685d2757663e099))
+
+
 ## v0.44.2 (2026-06-17)
 
 ### Bug Fixes
