@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, Link, RefreshCw, RotateCcw, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
@@ -1605,6 +1605,8 @@ function KnowledgeRules({
   onDeleteRule: (ruleId: string) => Promise<void>;
 }) {
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [draftScope, setDraftScope] = React.useState("");
   if (loading && rules.length === 0) return <EmptyState text="Loading curated rules..." />;
   if (rules.length === 0) return <EmptyState text="No curated rules match the current filters." />;
   return (
@@ -1615,37 +1617,80 @@ function KnowledgeRules({
         const actor = primarySource ? primarySource.trigger_actor || (primarySource.actor !== "github" ? primarySource.actor : null) : null;
         const sourceUrls = sources.flatMap((source) => source.github_urls ?? []);
         const scopeOptions = knowledgeRuleScopeOptions(rule.scope);
+        const isEditing = editingId === rule.id;
+        const isBusy = busyId === rule.id;
         return (
           <article key={rule.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-white p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <KnowledgeRowHeader scope={rule.scope} type={rule.type} confidence={rule.confidence} status={`${rule.observations} observation${rule.observations === 1 ? "" : "s"}`} timestamp={rule.last_seen} now={now} />
               {isAdmin ? (
                 <div className="flex flex-wrap items-end gap-2">
-                  <Field label="Scope">
-                    <select
-                      className="control h-8 min-w-[180px] py-1 text-xs"
-                      value={rule.scope}
-                      disabled={busyId === rule.id}
-                      onChange={async (event) => {
-                        const nextScope = event.target.value;
-                        if (nextScope === rule.scope) return;
-                        setBusyId(rule.id);
-                        try {
-                          await onUpdateRuleScope(rule.id, nextScope);
-                        } finally {
-                          setBusyId(null);
-                        }
+                  {isEditing ? (
+                    <>
+                      <Field label="Scope">
+                        <select
+                          className="control h-8 min-w-[180px] py-1 text-xs"
+                          value={draftScope}
+                          disabled={isBusy}
+                          onChange={(event) => setDraftScope(event.target.value)}
+                        >
+                          {scopeOptions.map((option) => (
+                            <option value={option.value} key={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <button
+                        className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-slate-50 disabled:opacity-60"
+                        type="button"
+                        disabled={isBusy || draftScope === rule.scope}
+                        title="Save scope"
+                        onClick={async () => {
+                          if (draftScope === rule.scope) return;
+                          setBusyId(rule.id);
+                          try {
+                            await onUpdateRuleScope(rule.id, draftScope);
+                            setEditingId(null);
+                          } finally {
+                            setBusyId(null);
+                          }
+                        }}
+                      >
+                        <Save className="h-4 w-4" aria-hidden />
+                        Save
+                      </button>
+                      <button
+                        className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-muted hover:bg-slate-50 disabled:opacity-60"
+                        type="button"
+                        disabled={isBusy}
+                        title="Cancel scope edit"
+                        onClick={() => {
+                          setEditingId(null);
+                          setDraftScope("");
+                        }}
+                      >
+                        <X className="h-4 w-4" aria-hidden />
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-slate-50 disabled:opacity-60"
+                      type="button"
+                      disabled={isBusy}
+                      title="Edit scope"
+                      onClick={() => {
+                        setEditingId(rule.id);
+                        setDraftScope(rule.scope);
                       }}
                     >
-                      {scopeOptions.map((option) => (
-                        <option value={option.value} key={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </Field>
+                      <Pencil className="h-4 w-4" aria-hidden />
+                      Edit
+                    </button>
+                  )}
                   <button
                     className="inline-flex h-8 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
                     type="button"
-                    disabled={busyId === rule.id}
+                    disabled={isBusy}
                     onClick={async () => {
                       if (!window.confirm("Delete this curated rule?")) return;
                       setBusyId(rule.id);

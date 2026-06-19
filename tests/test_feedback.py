@@ -297,6 +297,15 @@ def test_update_rule_scope_moves_and_merges_duplicate_target_rule(tmp_path):
     JobQueue(db)
     repo_rule = feedback.add_rule(db, "repo:gisce/erp", "style_preference", "Prefer compact feedback in GitHub follow-ups.", 0.7, ["event-1"])
     global_rule = feedback.add_rule(db, "global", "style_preference", "Prefer compact feedback in GitHub follow-ups.", 0.9, ["event-2"])
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "UPDATE feedback_rules SET created_at=?, last_seen=? WHERE id=?",
+            ("2026-06-01T10:00:00Z", "2026-06-02T10:00:00Z", repo_rule["id"]),
+        )
+        con.execute(
+            "UPDATE feedback_rules SET created_at=?, last_seen=? WHERE id=?",
+            ("2026-06-03T10:00:00Z", "2026-06-04T10:00:00Z", global_rule["id"]),
+        )
 
     moved = feedback.update_rule_scope(db, repo_rule["id"], "global")
     rules = feedback.list_rules(db, min_confidence=0)
@@ -306,8 +315,28 @@ def test_update_rule_scope_moves_and_merges_duplicate_target_rule(tmp_path):
     assert moved["scope"] == "global"
     assert moved["confidence"] == 0.9
     assert moved["observations"] == 2
+    assert moved["created_at"] == "2026-06-01T10:00:00Z"
+    assert moved["last_seen"] == "2026-06-04T10:00:00Z"
     assert moved["source_events"] == ["event-1", "event-2"]
     assert [rule["id"] for rule in rules] == [global_rule["id"]]
+
+
+def test_update_rule_scope_preserves_rule_dates(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    rule = feedback.add_rule(db, "repo:gisce/erp", "style_preference", "Prefer compact feedback in GitHub follow-ups.", 0.7, ["event-1"])
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "UPDATE feedback_rules SET created_at=?, last_seen=? WHERE id=?",
+            ("2026-06-01T10:00:00Z", "2026-06-02T10:00:00Z", rule["id"]),
+        )
+
+    moved = feedback.update_rule_scope(db, rule["id"], "org:gisce")
+
+    assert moved is not None
+    assert moved["scope"] == "org:gisce"
+    assert moved["created_at"] == "2026-06-01T10:00:00Z"
+    assert moved["last_seen"] == "2026-06-02T10:00:00Z"
 
 
 def test_list_proposals_includes_source_event_details(tmp_path):

@@ -416,7 +416,6 @@ def validate_rule_scope(scope: str) -> str:
 
 def update_rule_scope(db_path: str | Path, rule_id: str, scope: str) -> dict[str, Any] | None:
     new_scope = validate_rule_scope(scope)
-    now = utc_now()
     with _connect(db_path) as con:
         row = con.execute("SELECT * FROM feedback_rules WHERE id=?", (rule_id,)).fetchone()
         if not row:
@@ -431,11 +430,12 @@ def update_rule_scope(db_path: str | Path, rule_id: str, scope: str) -> dict[str
             merged_events = sorted(set(json.loads(existing["source_events_json"] or "[]") + source_events))
             con.execute(
                 """UPDATE feedback_rules
-                SET confidence=?, last_seen=?, source_events_json=?, observations=?
+                SET confidence=?, created_at=?, last_seen=?, source_events_json=?, observations=?
                 WHERE id=?""",
                 (
                     max(float(existing["confidence"]), float(row["confidence"])),
-                    now,
+                    min(str(existing["created_at"]), str(row["created_at"])),
+                    max(str(existing["last_seen"]), str(row["last_seen"])),
                     json.dumps(merged_events, ensure_ascii=False, sort_keys=True),
                     int(existing["observations"]) + int(row["observations"]),
                     existing["id"],
@@ -447,9 +447,9 @@ def update_rule_scope(db_path: str | Path, rule_id: str, scope: str) -> dict[str
 
         con.execute(
             """UPDATE feedback_rules
-            SET id=?, scope=?, last_seen=?
+            SET id=?, scope=?
             WHERE id=?""",
-            (new_id, new_scope, now, rule_id),
+            (new_id, new_scope, rule_id),
         )
         updated = con.execute("SELECT * FROM feedback_rules WHERE id=?", (new_id,)).fetchone()
         return _rule_dict(con, updated) if updated else None
