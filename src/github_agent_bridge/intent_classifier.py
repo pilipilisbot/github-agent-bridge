@@ -21,6 +21,7 @@ ALLOWED_ACTIONS = {
 }
 ALLOWED_WORK_INTENTS = {"review_only", "work_allowed"}
 INTENT_CLASSIFIER_PROMPT = load_prompt_rule("intent_classifier.md")
+HUMAN_COMMENT_TARGET_KINDS = {"issue_comment", "review_comment", "commit_comment"}
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ def should_classify_with_llm(
     cfg = policy.intent_classifier
     if not cfg.enabled:
         return False
-    if ctx.target_kind != "issue_comment":
+    if ctx.target_kind not in HUMAN_COMMENT_TARGET_KINDS:
         return False
     if not policy.trusted_source(n, ctx):
         return False

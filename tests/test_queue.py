@@ -269,6 +269,36 @@ def test_enqueue_can_apply_enabled_llm_intent_classifier(tmp_path, monkeypatch):
     assert job.metadata["intent_classifier"]["parser"] == {"action": "reply_comment", "work_intent": "review_only"}
 
 
+def test_enqueue_can_apply_llm_intent_classifier_to_review_comments(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_classify(n, ctx, parser_result, cfg, **kwargs):
+        calls.append(ctx.target_kind)
+        return IntentClassification(
+            action="reply_comment",
+            work_intent="work_allowed",
+            confidence=0.91,
+            reason="User asks for an implementation change from a review comment.",
+            applied=True,
+        )
+
+    monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)
+    q = JobQueue(tmp_path / "q.sqlite3")
+
+    job, state = q.enqueue(
+        notif(
+            1,
+            "<1@github.com>",
+            "@pilipilisbot crea un test https://github.com/gisce/erp/pull/1#discussion_r3195891007",
+        ),
+        intent_policy(),
+    )
+
+    assert state == "enqueued"
+    assert calls == ["review_comment"]
+    assert job.work_intent == "work_allowed"
+
+
 def test_enqueue_falls_back_when_llm_intent_confidence_is_low(tmp_path, monkeypatch):
     def fake_classify(n, ctx, parser_result, cfg, **kwargs):
         return IntentClassification(
