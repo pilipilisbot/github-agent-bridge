@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.45.1 (2026-06-19)
+
+### Bug Fixes
+
+- Make rule scope edits explicit
+  ([`902a5fe`](https://github.com/pilipilisbot/github-agent-bridge/commit/902a5fed097b3eba205b22d436f62af8f814dbdd))
+
+
 ## v0.45.0 (2026-06-18)
 
 ### Documentation
