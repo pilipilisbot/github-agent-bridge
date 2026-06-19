@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from .feedback import _extract_json_object, _openclaw_text_from_json, compact, load_prompt_rule
+from .feedback import _extract_json_object, _openclaw_text_from_json, compact, load_prompt_rule, session_id_for_event
 from .models import GitHubContext, Notification
 from .parser import github_event_flags
 from .policy import IntentClassifier, Policy
@@ -108,6 +108,27 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
     )
 
 
+def intent_session_event_id(n: Notification, ctx: GitHubContext) -> str:
+    event = {
+        "message_id": n.message_id,
+        "work_key": ctx.work_key,
+        "repo": ctx.repo,
+        "issue_number": ctx.issue_number,
+        "comment_id": ctx.comment_id,
+        "review_id": ctx.review_id,
+        "review_comment_id": ctx.review_comment_id,
+        "commit_comment_id": ctx.commit_comment_id,
+        "commit_sha": ctx.commit_sha,
+        "target_kind": ctx.target_kind,
+        "workflow_run_id": ctx.workflow_run_id,
+    }
+    return json.dumps(event, ensure_ascii=False, sort_keys=True)
+
+
+def intent_session_id(base_session_id: str, n: Notification, ctx: GitHubContext, agent: str | None = None) -> str:
+    return session_id_for_event(base_session_id, agent, intent_session_event_id(n, ctx))
+
+
 def classify_notification_with_llm(
     n: Notification,
     ctx: GitHubContext,
@@ -122,7 +143,7 @@ def classify_notification_with_llm(
         "agent",
         "--json",
         "--session-id",
-        cfg.session_id,
+        intent_session_id(cfg.session_id, n, ctx, agent),
         "--timeout",
         str(cfg.timeout),
         "--thinking",
