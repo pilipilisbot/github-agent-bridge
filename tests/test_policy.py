@@ -101,6 +101,47 @@ def test_policy_from_file_loads_feedback_learning(tmp_path):
     assert policy.feedback_learning.session_id == "feedback-test"
 
 
+def test_policy_from_file_loads_intent_classifier(tmp_path):
+    policy_file = tmp_path / "policy.json"
+    policy_file.write_text(
+        """{
+          "intentClassifier": {
+            "enabled": true,
+            "model": "gpt-5.4-mini",
+            "thinking": "low",
+            "minConfidence": 0.8,
+            "onlyWhenParserDefaulted": false,
+            "openclawBin": "/tmp/openclaw",
+            "sessionId": "intent-test",
+            "timeout": 12
+          }
+        }"""
+    )
+
+    policy = Policy.from_file(policy_file)
+
+    assert policy.intent_classifier.enabled is True
+    assert policy.intent_classifier.model == "gpt-5.4-mini"
+    assert policy.intent_classifier.thinking == "low"
+    assert policy.intent_classifier.min_confidence == 0.8
+    assert policy.intent_classifier.only_when_parser_defaulted is False
+    assert policy.intent_classifier.openclaw_bin == "/tmp/openclaw"
+    assert policy.intent_classifier.session_id == "intent-test"
+    assert policy.intent_classifier.timeout == 12
+
+
+def test_policy_from_file_rejects_invalid_intent_classifier_confidence(tmp_path):
+    policy_file = tmp_path / "policy.json"
+    policy_file.write_text('{"intentClassifier": {"minConfidence": 1.5}}')
+
+    try:
+        Policy.from_file(policy_file)
+    except ValueError as exc:
+        assert "intentClassifier.minConfidence" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for invalid intent classifier confidence")
+
+
 def test_policy_from_file_loads_model_routes_and_resolution_order(tmp_path):
     policy_file = tmp_path / "policy.json"
     policy_file.write_text(

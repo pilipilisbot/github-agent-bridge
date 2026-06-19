@@ -14,6 +14,7 @@ ALLOWED_PROMPT_RULES = {
     "feedback_classifier",
     "feedback_learning",
     "human_reviewer",
+    "intent_classifier",
     "pr_metadata",
     "pr_review",
     "prompt_injection",
@@ -94,6 +95,18 @@ class FeedbackLearning:
 
 
 @dataclass(frozen=True)
+class IntentClassifier:
+    enabled: bool = False
+    model: str | None = None
+    thinking: str = "low"
+    min_confidence: float = 0.75
+    only_when_parser_defaulted: bool = True
+    openclaw_bin: str = "openclaw"
+    session_id: str = "github-agent-bridge-intent"
+    timeout: int = 60
+
+
+@dataclass(frozen=True)
 class Policy:
     source_from: str | tuple[str, ...] = "notifications@github.com"
     required_url_prefix: str = "https://github.com/"
@@ -112,6 +125,7 @@ class Policy:
     model_routes: ModelRoutes = field(default_factory=ModelRoutes)
     prompt_overrides: PromptOverrides = field(default_factory=PromptOverrides)
     feedback_learning: FeedbackLearning = field(default_factory=FeedbackLearning)
+    intent_classifier: IntentClassifier = field(default_factory=IntentClassifier)
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Policy":
@@ -236,6 +250,29 @@ class Policy:
                 session_id=str(raw.get("sessionId", "github-agent-bridge-feedback")),
             )
 
+        def intent_classifier(raw: dict) -> IntentClassifier:
+            raw = raw or {}
+            min_confidence = float(raw.get("minConfidence", 0.75))
+            if min_confidence < 0 or min_confidence > 1:
+                raise ValueError("intentClassifier.minConfidence must be between 0 and 1")
+            timeout = int(raw.get("timeout", 60))
+            if timeout < 1:
+                raise ValueError("intentClassifier.timeout must be at least 1")
+            thinking = str(raw.get("thinking", "low")).lower()
+            if thinking not in ALLOWED_THINKING_LEVELS:
+                raise ValueError(f"intentClassifier.thinking must be one of {sorted(ALLOWED_THINKING_LEVELS)}")
+            model = raw.get("model")
+            return IntentClassifier(
+                enabled=bool(raw.get("enabled", False)),
+                model=str(model) if model else None,
+                thinking=thinking,
+                min_confidence=min_confidence,
+                only_when_parser_defaulted=bool(raw.get("onlyWhenParserDefaulted", True)),
+                openclaw_bin=str(raw.get("openclawBin", "openclaw")),
+                session_id=str(raw.get("sessionId", "github-agent-bridge-intent")),
+                timeout=timeout,
+            )
+
         return cls(
             source_from=tuple(source.get("from")) if isinstance(source.get("from"), list) else source.get("from", cls.source_from),
             required_url_prefix=source.get("requiredUrlPrefix", cls.required_url_prefix),
@@ -256,6 +293,7 @@ class Policy:
             model_routes=model_routes(data.get("modelRoutes", {})),
             prompt_overrides=prompt_overrides(data.get("promptOverrides", {})),
             feedback_learning=feedback_learning(data.get("feedbackLearning", {})),
+            intent_classifier=intent_classifier(data.get("intentClassifier", {})),
         )
 
     def trusted_source(self, n: Notification, ctx: GitHubContext) -> bool:

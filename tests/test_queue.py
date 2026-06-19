@@ -1,5 +1,6 @@
 from github_agent_bridge.models import Notification
-from github_agent_bridge.policy import FeedbackLearning, Policy
+from github_agent_bridge.intent_classifier import IntentClassification
+from github_agent_bridge.policy import FeedbackLearning, IntentClassifier, Policy
 from github_agent_bridge.queue import JobQueue
 
 BODY1 = "@pilipilisbot one https://github.com/gisce/erp/pull/1#issuecomment-10"
@@ -13,6 +14,14 @@ def notif(uid, mid, body):
 
 def policy():
     return Policy(trusted_orgs={"gisce"}, bot_logins={"pilipilisbot"})
+
+
+def intent_policy(**kwargs):
+    return Policy(
+        trusted_orgs={"gisce"},
+        bot_logins={"pilipilisbot"},
+        intent_classifier=IntentClassifier(enabled=True, model="gpt-5.4-mini", **kwargs),
+    )
 
 
 def test_enqueue_and_coalesce_same_work_key(tmp_path, monkeypatch):
@@ -225,6 +234,106 @@ def test_enqueue_captures_feedback_for_actionable_jobs(tmp_path, monkeypatch):
             {"trigger_actor": "Edu", "trigger_actor_avatar_url": "https://github.com/Edu.png?size=80"},
         )
     ]
+
+
+def test_enqueue_can_apply_enabled_llm_intent_classifier(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_classify(n, ctx, parser_result, cfg, **kwargs):
+        calls.append((parser_result.action, parser_result.work_intent, cfg.model, kwargs))
+        return IntentClassification(
+            action="reply_comment",
+            work_intent="work_allowed",
+            confidence=0.91,
+            reason="User asks to create a test.",
+            applied=True,
+        )
+
+    monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)
+    q = JobQueue(tmp_path / "q.sqlite3")
+
+    job, state = q.enqueue(
+        notif(
+            1,
+            "<1@github.com>",
+            "@pilipilisbot crea un test https://github.com/gisce/erp/pull/1#issuecomment-10",
+        ),
+        intent_policy(),
+    )
+
+    assert state == "enqueued"
+    assert job.action == "reply_comment"
+    assert job.work_intent == "work_allowed"
+    assert calls[0][0:3] == ("reply_comment", "review_only", "gpt-5.4-mini")
+    assert job.metadata["intent_classifier"]["llm"]["applied"] is True
+    assert job.metadata["intent_classifier"]["parser"] == {"action": "reply_comment", "work_intent": "review_only"}
+
+
+def test_enqueue_falls_back_when_llm_intent_confidence_is_low(tmp_path, monkeypatch):
+    def fake_classify(n, ctx, parser_result, cfg, **kwargs):
+        return IntentClassification(
+            action="reply_comment",
+            work_intent="work_allowed",
+            confidence=0.4,
+            reason="Unsure.",
+            applied=False,
+        )
+
+    monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)
+    q = JobQueue(tmp_path / "q.sqlite3")
+
+    job, state = q.enqueue(
+        notif(
+            1,
+            "<1@github.com>",
+            "@pilipilisbot crea un test https://github.com/gisce/erp/pull/1#issuecomment-10",
+        ),
+        intent_policy(min_confidence=0.75),
+    )
+
+    assert state == "enqueued"
+    assert job.action == "reply_comment"
+    assert job.work_intent == "review_only"
+    assert job.metadata["intent_classifier"]["llm"]["applied"] is False
+
+
+def test_enqueue_falls_back_when_llm_intent_classifier_errors(tmp_path, monkeypatch):
+    def fake_classify(n, ctx, parser_result, cfg, **kwargs):
+        raise RuntimeError("classifier unavailable")
+
+    monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)
+    q = JobQueue(tmp_path / "q.sqlite3")
+
+    job, state = q.enqueue(
+        notif(
+            1,
+            "<1@github.com>",
+            "@pilipilisbot crea un test https://github.com/gisce/erp/pull/1#issuecomment-10",
+        ),
+        intent_policy(),
+    )
+
+    assert state == "enqueued"
+    assert job.action == "reply_comment"
+    assert job.work_intent == "review_only"
+    assert "classifier unavailable" in job.metadata["intent_classifier"]["error"]
+
+
+def test_enqueue_skips_llm_intent_classifier_when_disabled(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", lambda *args, **kwargs: calls.append(args) or None)
+    q = JobQueue(tmp_path / "q.sqlite3")
+
+    q.enqueue(
+        notif(
+            1,
+            "<1@github.com>",
+            "@pilipilisbot crea un test https://github.com/gisce/erp/pull/1#issuecomment-10",
+        ),
+        policy(),
+    )
+
+    assert calls == []
 
 
 def test_enqueue_workflow_run_failed_notification(tmp_path):
