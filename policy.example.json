@@ -90,5 +90,15 @@
     "model": "gpt-5.4-mini",
     "thinking": "low",
     "sessionId": "github-agent-bridge-feedback"
+  },
+  "intentClassifier": {
+    "enabled": false,
+    "model": "gpt-5.4-mini",
+    "thinking": "low",
+    "minConfidence": 0.75,
+    "onlyWhenParserDefaulted": true,
+    "openclawBin": "openclaw",
+    "sessionId": "github-agent-bridge-intent",
+    "timeout": 60
   }
 }

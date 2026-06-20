@@ -1,6 +1,6 @@
 # `policy.json` reference
 
-`policy.json` controls which GitHub notifications the bridge trusts, which repositories are in scope, which actions are automatic, where OpenClaw agent work is delivered, which operating posture the agent uses, and whether feedback learning is captured.
+`policy.json` controls which GitHub notifications the bridge trusts, which repositories are in scope, which actions are automatic, where OpenClaw agent work is delivered, which operating posture the agent uses, whether the optional LLM intent classifier is enabled, and whether feedback learning is captured.
 
 ## Quick map
 
@@ -11,8 +11,9 @@ flowchart TD
     C --> D[repoRoutes/orgRoutes]
     D --> E[repoRoles/orgRoles]
     E --> F[promptOverrides]
-    F --> G[feedbackLearning]
-    G --> H[OpenClaw dispatch]
+    F --> G[intentClassifier]
+    G --> H[feedbackLearning]
+    H --> I[OpenClaw dispatch]
 ```
 
 | Question | Policy area |
@@ -23,6 +24,7 @@ flowchart TD
 | Where should accepted work be delivered? | `repoRoutes`, `orgRoutes` |
 | How much authority should the agent use? | `repoRoles`, `orgRoles` |
 | Which prompt text should be customized? | `promptOverrides` |
+| Should trusted human comments be classified by an LLM before policy routing? | `intentClassifier` |
 | Should feedback-like GitHub comments be captured as rule candidates? | `feedbackLearning` |
 
 Default path in the packaged CLI/systemd examples:
@@ -82,6 +84,16 @@ gab --policy ~/.config/github-agent-bridge/policy.json enqueue-comment-url ...
   "feedbackLearning": {
     "enabled": true,
     "minConfidence": 0.5
+  },
+  "intentClassifier": {
+    "enabled": false,
+    "model": "gpt-5.4-mini",
+    "thinking": "low",
+    "minConfidence": 0.75,
+    "onlyWhenParserDefaulted": true,
+    "openclawBin": "openclaw",
+    "sessionId": "github-agent-bridge-intent",
+    "timeout": 60
   }
 }
 ```
@@ -101,6 +113,7 @@ gab --policy ~/.config/github-agent-bridge/policy.json enqueue-comment-url ...
 | `botLogins` | array of strings | `["pilipilisbot"]` | GitHub login names that should count as addressed bots when classifying mentions, assignments, and review requests. |
 | `actions` | object | built-in action defaults | Maps classified notification actions to policy decisions. |
 | `promptOverrides` | object | `{}` | Optional Markdown files that replace selected packaged prompt resources. |
+| `intentClassifier` | object | `{ "enabled": false, "thinking": "low", "minConfidence": 0.75, "onlyWhenParserDefaulted": true, "openclawBin": "openclaw", "sessionId": "github-agent-bridge-intent", "timeout": 60 }` | Controls the optional enqueue-time LLM classifier for trusted human GitHub comments. |
 | `feedbackLearning` | object | `{ "enabled": true, "minConfidence": 0.5, "autoApproveConfidence": 0.8 }` | Controls candidate capture, autonomous learning, and prompt threshold for feedback rules. |
 
 Unknown top-level keys are ignored by the current implementation.
@@ -705,6 +718,40 @@ For PR/issue comments that produce `reply_comment`, the bridge checks the actual
 Reviews with no actionable code comments (for example “generated no new comments”, “wasn't able to review any files”, or “no actionable findings”) are treated as no-op: the bridge reacts 👀 + 👍 and skips agent dispatch, even if the bot is assigned.
 
 Agents must also apply the comment value rule before posting: comment only when adding a new finding, decision, direct answer, completed-work evidence, or useful next-step clarification. If the would-be comment only restates visible GitHub state or previous discussion, react 👀/👍 and stay silent.
+
+## Intent classifier
+
+`intentClassifier` controls an optional enqueue-time LLM classifier for trusted human GitHub comments. It is disabled by default; when enabled, the bridge calls OpenClaw with the packaged `prompt_rules/intent_classifier.md` prompt or `promptOverrides.rules.intent_classifier`, expects JSON output, and uses the result only when confidence is high enough. Low-confidence, invalid, timed-out, or failed classifier calls fall back to the deterministic parser result.
+
+Example:
+
+```json
+{
+  "intentClassifier": {
+    "enabled": true,
+    "model": "gpt-5.4-mini",
+    "thinking": "low",
+    "minConfidence": 0.75,
+    "onlyWhenParserDefaulted": true,
+    "openclawBin": "openclaw",
+    "sessionId": "github-agent-bridge-intent",
+    "timeout": 60
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Enable the LLM classifier for eligible trusted GitHub comments. |
+| `model` | string | unset | Optional OpenClaw model override for classifier calls. When unset, OpenClaw uses its default model for the session/configuration. |
+| `thinking` | string | `low` | OpenClaw thinking level for classifier calls. Supported values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `adaptive`, and `max`. |
+| `minConfidence` | number | `0.75` | Minimum classifier confidence required before replacing the deterministic parser action/work-intent result. |
+| `onlyWhenParserDefaulted` | boolean | `true` | Run the classifier only when the deterministic parser defaulted to the conservative comment classification. Set to `false` to let the classifier arbitrate all eligible trusted human comments. |
+| `openclawBin` | string | `openclaw` | OpenClaw executable used for classifier subprocess calls. |
+| `sessionId` | string | `github-agent-bridge-intent` | Base session id prefix for classifier calls. The bridge derives an isolated per-event session id from this value plus routed agent and GitHub notification/context data. |
+| `timeout` | integer | `60` | Maximum seconds to wait for one classifier call before falling back to parser behavior. |
+
+The classifier runs before policy decision mapping, but it does not grant trust or bypass authorization. Source trust, `enabledRepos`, `actions`, `trustedRepos`, `trustedOrgs`, routes, roles, and the final `Policy.decision` checks still apply after classification.
 
 ## Feedback learning
 
