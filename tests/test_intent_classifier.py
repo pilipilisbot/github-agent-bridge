@@ -3,6 +3,7 @@ import subprocess
 
 from github_agent_bridge.intent_classifier import (
     ParserResult,
+    build_intent_prompt,
     classify_notification_with_llm,
     intent_session_id,
 )
@@ -32,6 +33,34 @@ def test_intent_session_id_keeps_base_and_agent_but_isolates_events():
     assert first_id.startswith("intent-base-gisce-developer-")
     assert second_id.startswith("intent-base-gisce-developer-")
     assert first_id != second_id
+
+
+def test_build_intent_prompt_allows_literal_json_braces_in_template():
+    notif = notification("<1@github.com>", "@pilipilisbot https://github.com/gisce/erp/pull/1#issuecomment-10")
+
+    prompt = build_intent_prompt(
+        notif,
+        extract_github_context(notif.body),
+        ParserResult("reply_comment", "review_only"),
+        prompt_template='Return JSON like {"action": "reply_comment"}\nEvent:\n{event_json}\n',
+    )
+
+    assert 'Return JSON like {"action": "reply_comment"}' in prompt
+    assert "{event_json}" not in prompt
+    assert '"message_id": "<1@github.com>"' in prompt
+
+
+def test_packaged_intent_prompt_builds_without_formatting_json_example():
+    notif = notification("<1@github.com>", "@pilipilisbot https://github.com/gisce/erp/pull/1#issuecomment-10")
+
+    prompt = build_intent_prompt(
+        notif,
+        extract_github_context(notif.body),
+        ParserResult("reply_comment", "review_only"),
+    )
+
+    assert '"action": "reply_comment"' in prompt
+    assert '"message_id": "<1@github.com>"' in prompt
 
 
 def test_classify_notification_with_llm_uses_isolated_session_id(monkeypatch):
