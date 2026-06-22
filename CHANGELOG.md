@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.46.0 (2026-06-22)
+
+### Bug Fixes
+
+- Classify all human GitHub comment intents
+  ([`9ac800d`](https://github.com/pilipilisbot/github-agent-bridge/commit/9ac800d9cba9acd87bbabb1cfb2d542d2c57a005))
+
+- Classify issue creation requests as work
+  ([`9fa2a4e`](https://github.com/pilipilisbot/github-agent-bridge/commit/9fa2a4efc44ae5bfd2cc8b98f9449887b1ccfd27))
+
+- Isolate intent classifier sessions
+  ([`18ef1fb`](https://github.com/pilipilisbot/github-agent-bridge/commit/18ef1fbd7f8b81686240fae21e47d87cf420dd8a))
+
+### Documentation
+
+- Document intent classifier policy
+  ([`829158e`](https://github.com/pilipilisbot/github-agent-bridge/commit/829158ed91839d2a891b17ec80c74fe58271fcd7))
+
+### Features
+
+- Add optional LLM intent classifier
+  ([`6addd08`](https://github.com/pilipilisbot/github-agent-bridge/commit/6addd08c97a5bf7e1b0a294b15ada83d5af54843))
+
+
 ## v0.45.1 (2026-06-19)
 
 ### Bug Fixes
