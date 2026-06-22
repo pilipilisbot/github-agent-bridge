@@ -29,7 +29,7 @@ def test_sql_schema_is_packaged_resource_and_valid():
 
 def test_packaged_resource_names_are_documented():
     prompt_names = {p.name for p in resources.files("github_agent_bridge.prompt_rules").iterdir() if p.name.endswith(".md")}
-    assert {"base.md", "worktree.md", "pr_metadata.md", "human_reviewer.md", "review_only.md", "sync_after_merge.md", "feedback_classifier.md"} <= prompt_names
+    assert {"base.md", "worktree.md", "pr_metadata.md", "human_reviewer.md", "review_only.md", "sync_after_merge.md", "feedback_classifier.md", "intent_classifier.md"} <= prompt_names
     role_names = {p.name for p in resources.files("github_agent_bridge.prompt_rules").joinpath("roles").iterdir() if p.name.endswith(".md")}
     assert {"owner.md", "maintainer.md", "contributor.md", "reviewer.md"} <= role_names
     sql_names = {p.name for p in resources.files("github_agent_bridge.sql").iterdir() if p.name.endswith(".sql")}

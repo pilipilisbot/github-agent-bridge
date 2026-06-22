@@ -167,6 +167,17 @@ def test_pr_followup_can_still_request_explicit_implementation():
     assert classify_work_intent(subject, body) == "work_allowed"
 
 
+def test_pr_followup_can_request_issue_creation():
+    subject = "Re: [gisce/erp] Simplificación y limpieza de la exportación de traducciones (PR #25497)"
+    body = (
+        "@giscebot crea la issue amb tots els passos com a guia, "
+        "i ja hi pots vincular aquest primer treball d'aquesta pull-request"
+    )
+
+    assert classify_github_action(subject, body, {"giscebot"}) == "open_issue"
+    assert classify_work_intent(subject, body, {"giscebot"}) == "work_allowed"
+
+
 def test_pr_assignment_allows_work():
     subject = "Re: [gisce/erp] Permitir caller en los dominios (PR #27315)"
     body = "ecarreras assigned @pilipilisbot to this pull request."

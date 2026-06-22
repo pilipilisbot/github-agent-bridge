@@ -11,6 +11,7 @@ from .policy import Policy
 from .session_correlation import session_id_for_job, session_id_for_job_attempt
 from . import feedback
 from .actors import trigger_actor_details_for_enqueue
+from .intent_classifier import ParserResult, classify_notification_with_llm, should_classify_with_llm
 
 SCHEMA_PACKAGE = "github_agent_bridge.sql"
 
@@ -51,11 +52,43 @@ class JobQueue:
             message_id=n.message_id,
         )
         intent = classify_work_intent(n.subject, n.body, policy.bot_logins)
+        metadata: dict[str, object] = {"received_at": n.received_at}
+        parser_result = ParserResult(action, intent)
+        if should_classify_with_llm(n, ctx, parser_result, policy):
+            metadata["intent_classifier"] = {
+                "parser": {"action": action, "work_intent": intent},
+                "enabled": True,
+            }
+            try:
+                llm_result = classify_notification_with_llm(
+                    n,
+                    ctx,
+                    parser_result,
+                    policy.intent_classifier,
+                    agent=policy.route_for(ctx.repo).agent,
+                    prompt_template=(
+                        feedback.load_prompt_override(path)
+                        if (path := policy.prompt_overrides.rule_path("intent_classifier"))
+                        else None
+                    ),
+                )
+                classifier_metadata = llm_result.to_metadata()
+                metadata["intent_classifier"] = {
+                    **metadata["intent_classifier"],
+                    "llm": classifier_metadata,
+                }
+                if llm_result.applied:
+                    action = llm_result.action
+                    intent = llm_result.work_intent
+            except Exception as exc:
+                metadata["intent_classifier"] = {
+                    **metadata["intent_classifier"],
+                    "error": str(exc)[:500],
+                }
         decision = policy.decision(n, ctx, action)
         status = {"auto": "done", "ask": "waiting_approval", "deny": "denied"}.get(decision, "pending")
         now = utc_now()
         trigger_actor = trigger_actor_details_for_enqueue(n, ctx)
-        metadata: dict[str, object] = {"received_at": n.received_at}
         if trigger_actor and trigger_actor.user_id:
             metadata["trigger_actor_id"] = trigger_actor.user_id
         with self.connect() as con:

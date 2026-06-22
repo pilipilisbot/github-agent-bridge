@@ -8,6 +8,16 @@ from .models import GitHubContext
 
 REVIEW_ONLY_PATTERNS = ("fes-ne una review", "fes una review", "fes review", "fer una review", "fes-ne una revisio", "fes-ne una revisió", "fes una revisio", "fes una revisió", "fer una revisio", "fer una revisió", "review de la pr", "revisió de la pr", "revisio de la pr", "revisa aquesta pr", "revisa els canvis", "revisar els canvis", "com veus els canvis", "què et semblen els canvis", "que et semblen els canvis", "what do you think of these changes", "please review", "can you review")
 IMPLEMENTATION_PATTERNS = ("fes els canvis", "fes-ho", "implementa", "modifica", "canvia", "arregla", "corregeix", "fix", "push", "commit", "aplica", "resol", "resolve")
+ISSUE_CREATION_PATTERNS = (
+    "crea la issue",
+    "crea una issue",
+    "obre la issue",
+    "obre una issue",
+    "create the issue",
+    "create an issue",
+    "open the issue",
+    "open an issue",
+)
 BOT_MENTION_PATTERNS = ("you are receiving this because you were mentioned",)
 ASSIGNMENT_PATTERNS = ("assigned you", "assigned to you", "you were assigned", "you are assigned")
 REVIEW_REQUEST_PATTERNS = ("requested your review", "requested a review from you", "you were requested for review", "review requested")
@@ -84,7 +94,7 @@ def classify_work_intent(subject: str, body: str, bot_logins: set[str] | None = 
     text = f"{subject}\n{body}".lower()
     flags = github_event_flags(subject, body, bot_logins)
     asks_review = flags["review_requested"] or _contains_any(text, REVIEW_ONLY_PATTERNS)
-    asks_implementation = flags["assigned"] or _contains_any(text, IMPLEMENTATION_PATTERNS)
+    asks_implementation = flags["assigned"] or _contains_any(text, IMPLEMENTATION_PATTERNS + ISSUE_CREATION_PATTERNS)
     if asks_review and not asks_implementation:
         return "review_only"
     # PR threads are review/discussion by default. Do not mutate a contributor's
@@ -126,6 +136,8 @@ def classify_github_action(
         return "submit_review"
     if flags["copilot_review"] or "pullrequestreview" in text:
         return "reply_comment"
+    if _contains_any(text, ISSUE_CREATION_PATTERNS):
+        return "open_issue"
     if flags["assigned"]:
         return "open_issue"
     if flags["bot_mentioned"]:
