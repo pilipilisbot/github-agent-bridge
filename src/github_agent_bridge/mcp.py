@@ -8,7 +8,7 @@ import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, BinaryIO
 
 from .feedback import list_applicable_rules, list_repositories
 from .models import utc_now
@@ -182,19 +182,55 @@ class MCPServer:
         }
 
 
-def serve_stdio(db_path: str | Path, *, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> int:
+def _read_framed_message(stdin: BinaryIO) -> dict[str, Any] | None:
+    first = stdin.read(1)
+    if not first:
+        return None
+
+    header = bytearray(first)
+    while b"\r\n\r\n" not in header and b"\n\n" not in header:
+        chunk = stdin.read(1)
+        if not chunk:
+            raise ValueError("incomplete MCP header")
+        header.extend(chunk)
+
+    marker = b"\r\n\r\n" if b"\r\n\r\n" in header else b"\n\n"
+    raw_headers, body_start = bytes(header).split(marker, 1)
+    content_length = None
+    for raw_line in raw_headers.decode("ascii").splitlines():
+        name, _, value = raw_line.partition(":")
+        if name.strip().lower() == "content-length":
+            content_length = int(value.strip())
+            break
+    if content_length is None:
+        raise ValueError("missing Content-Length header")
+
+    body = body_start + stdin.read(content_length - len(body_start))
+    if len(body) != content_length:
+        raise ValueError("incomplete MCP body")
+    request = json.loads(body.decode("utf-8"))
+    if not isinstance(request, dict):
+        raise ValueError("request must be a JSON object")
+    return request
+
+
+def _write_framed_message(stdout: BinaryIO, response: dict[str, Any]) -> None:
+    body = json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    stdout.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+    stdout.flush()
+
+
+def serve_stdio(db_path: str | Path, *, stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
+    stdin = stdin or sys.stdin.buffer
+    stdout = stdout or sys.stdout.buffer
     server = MCPServer(db_path)
-    for line in stdin:
-        if not line.strip():
-            continue
+    while True:
         try:
-            request = json.loads(line)
-            if not isinstance(request, dict):
-                raise ValueError("request must be a JSON object")
+            request = _read_framed_message(stdin)
+            if request is None:
+                return 0
             response = server.handle(request)
         except Exception as exc:
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(exc)}}
         if response is not None:
-            stdout.write(json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n")
-            stdout.flush()
-    return 0
+            _write_framed_message(stdout, response)
