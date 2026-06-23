@@ -136,3 +136,13 @@ CREATE TABLE IF NOT EXISTS feedback_rule_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_rule_proposals_status ON feedback_rule_proposals(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_feedback_rule_proposals_event ON feedback_rule_proposals(event_id);
+CREATE TABLE IF NOT EXISTS mcp_tokens (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT,
+  expires_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tokens_active ON mcp_tokens(revoked_at, expires_at, created_at);

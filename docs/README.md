@@ -13,6 +13,7 @@ A compact map of the `github-agent-bridge` documentation set.
 | Roll out safely | [`shadow-canary.md`](shadow-canary.md) | How-to |
 | Operate production | [`operations.md`](operations.md) | How-to |
 | Configure dashboard GitHub OAuth | [`dashboard-github-oauth.md`](dashboard-github-oauth.md) | How-to |
+| Expose bridge knowledge to local agents | [`mcp.md`](mcp.md) | How-to |
 | Develop the bridge | [`development.md`](development.md) | How-to |
 | Diagnose known failures | [`failure-modes.md`](failure-modes.md) | Reference |
 | Understand release automation | [`releases.md`](releases.md) | Reference |

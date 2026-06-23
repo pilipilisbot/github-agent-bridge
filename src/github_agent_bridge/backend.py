@@ -47,6 +47,7 @@ from .dashboard_data import (
     transcript_entry_from_session_event,
 )
 from .monitor import monitor
+from .mcp import create_token, list_tokens, revoke_token
 from .observability import configure_sentry, list_alerts, recent_process_samples
 from .queue import JobQueue
 from .systemd_status import allowed_unit_names, stream_journal_lines, systemd_status
@@ -439,7 +440,16 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.get("/api/status")
     def api_status(profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         queue = JobQueue(config.db)
-        admin_actions = ["retry_job", "dismiss_job", "approve_knowledge_proposal", "reject_knowledge_proposal", "update_knowledge_rule_scope", "delete_knowledge_rule"]
+        admin_actions = [
+            "retry_job",
+            "dismiss_job",
+            "approve_knowledge_proposal",
+            "reject_knowledge_proposal",
+            "update_knowledge_rule_scope",
+            "delete_knowledge_rule",
+            "create_mcp_token",
+            "revoke_mcp_token",
+        ]
         if profile.get("is_admin"):
             admin_actions.extend(["view_autoupdate_plan", "refresh_autoupdate_plan", "apply_autoupdate", "complete_autoupdate_reload"])
         return {
@@ -703,6 +713,24 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if rule is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
         return {"rule": rule, "detail": "knowledge_rule_updated"}
+
+    @app.get("/api/mcp/tokens")
+    def api_mcp_tokens(_: dict[str, Any] = Depends(current_admin_profile), include_revoked: bool = False) -> dict[str, Any]:
+        return {"tokens": list_tokens(config.db, include_revoked=include_revoked)}
+
+    @app.post("/api/mcp/tokens")
+    def api_mcp_token_create(payload: dict[str, Any], _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        try:
+            created = create_token(config.db, str(payload.get("name") or ""), expires_at=payload.get("expires_at"))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return {"token": created["token"], "record": created["record"], "detail": "mcp_token_created"}
+
+    @app.delete("/api/mcp/tokens/{token_id}")
+    def api_mcp_token_revoke(token_id: str, _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+        if not revoke_token(config.db, token_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mcp_token_not_found")
+        return {"detail": "mcp_token_revoked"}
 
     @app.get("/api/events/stream")
     def api_events(_: str = Depends(current_user)) -> Response:

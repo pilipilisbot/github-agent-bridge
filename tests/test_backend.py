@@ -68,6 +68,8 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
         "reject_knowledge_proposal",
         "update_knowledge_rule_scope",
         "delete_knowledge_rule",
+        "create_mcp_token",
+        "revoke_mcp_token",
         "view_autoupdate_plan",
         "refresh_autoupdate_plan",
         "apply_autoupdate",
@@ -879,6 +881,29 @@ def test_dashboard_admin_can_change_knowledge_rule_scope(tmp_path):
     assert client.get("/api/knowledge").json()["rules"][0]["scope"] == "global"
     assert client.get("/api/knowledge", params={"repo": "gisce/erp"}).json()["rules"][0]["scope"] == "global"
     assert invalid.status_code == 400
+
+
+def test_dashboard_admin_manages_mcp_tokens(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice"}, admin_users={"alice"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
+
+    forbidden = client.post("/api/mcp/tokens", json={"name": "local agent"})
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"}, is_admin=True)))
+    created = client.post("/api/mcp/tokens", json={"name": "local agent"})
+    listed = client.get("/api/mcp/tokens")
+    revoked = client.delete(f"/api/mcp/tokens/{created.json()['record']['id']}")
+    listed_after_revoke = client.get("/api/mcp/tokens")
+
+    assert forbidden.status_code == 403
+    assert created.status_code == 200
+    assert created.json()["token"].startswith("gab_mcp_")
+    assert listed.json()["tokens"][0]["name"] == "local agent"
+    assert "token" not in listed.json()["tokens"][0]
+    assert revoked.status_code == 200
+    assert listed_after_revoke.json()["tokens"] == []
 
 
 def test_dashboard_retry_requires_admin_and_requeues_retryable_job(tmp_path):
