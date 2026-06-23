@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.46.1 (2026-06-23)
+
+### Bug Fixes
+
+- Render intent classifier prompt safely
+  ([`1169c98`](https://github.com/pilipilisbot/github-agent-bridge/commit/1169c988b8a6d13055f528e01502d4256ae52929))
+
+
 ## v0.46.0 (2026-06-22)
 
 ### Bug Fixes
