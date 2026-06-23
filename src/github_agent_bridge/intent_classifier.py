@@ -89,7 +89,7 @@ def build_intent_prompt(
         },
     }
     template = prompt_template or INTENT_CLASSIFIER_PROMPT
-    return template.format(event_json=json.dumps(event, ensure_ascii=False, sort_keys=True))
+    return template.replace("{event_json}", json.dumps(event, ensure_ascii=False, sort_keys=True))
 
 
 def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentClassification:
