@@ -47,7 +47,7 @@ from .dashboard_data import (
     transcript_entry_from_session_event,
 )
 from .monitor import monitor
-from .mcp import create_token, list_tokens, revoke_token
+from .mcp import MCPServer, authenticate_token, create_token, list_tokens, revoke_token
 from .observability import configure_sentry, list_alerts, recent_process_samples
 from .queue import JobQueue
 from .systemd_status import allowed_unit_names, stream_journal_lines, systemd_status
@@ -197,6 +197,14 @@ def _sse_event(event: str, data: dict[str, Any], *, event_id: int | None = None)
 
 def _transcript_sse_key(entry: dict[str, Any]) -> str:
     return json.dumps(entry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _bearer_token(request: Request) -> str:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="mcp_token_required")
+    return token.strip()
 
 
 async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int | None = None, sleep_seconds: float = 2.0):
@@ -758,6 +766,23 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if not revoke_token(config.db, token_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mcp_token_not_found")
         return {"detail": "mcp_token_revoked"}
+
+    @app.post("/api/mcp")
+    @app.post("/api/mcp/")
+    async def api_mcp_http(request: Request) -> Response:
+        if authenticate_token(config.db, _bearer_token(request)) is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_mcp_token")
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mcp_request_must_be_object")
+
+        response = MCPServer(config.db).handle(payload)
+        if response is None:
+            return Response(status_code=status.HTTP_202_ACCEPTED, headers=_redacted_headers())
+        return JSONResponse(response, headers=_redacted_headers())
 
     @app.get("/api/events/stream")
     def api_events(_: str = Depends(current_user)) -> Response:

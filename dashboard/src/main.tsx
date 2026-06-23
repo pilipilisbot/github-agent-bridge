@@ -1852,21 +1852,23 @@ function McpPage({
   const [createdToken, setCreatedToken] = React.useState<McpTokenCreateResponse | null>(null);
   const [actionError, setActionError] = React.useState("");
   const activeTokens = tokens ?? [];
-  const mcpDashboardUrl = `${(dashboardUrl || (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/$/, "")}/mcp`;
+  const publicBaseUrl = (dashboardUrl || (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/$/, "");
+  const mcpDashboardUrl = `${publicBaseUrl}/mcp`;
+  const mcpEndpointUrl = `${publicBaseUrl}/api/mcp`;
   if (user && !user.is_admin) {
     return (
       <div className="grid min-w-0 gap-4">
-        <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Read-only local-agent access is limited to dashboard admins." action={<RefreshButton onClick={onRefresh} />} />
+        <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Read-only agent access is limited to dashboard admins." action={<RefreshButton onClick={onRefresh} />} />
         <EmptyState text="Admin access is required to manage MCP tokens." />
       </div>
     );
   }
   return (
     <div className="grid min-w-0 gap-4">
-      <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Issue and revoke read-only tokens for local agents." action={<RefreshButton onClick={onRefresh} />} />
+      <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Issue and revoke read-only tokens for agents." action={<RefreshButton onClick={onRefresh} />} />
       {error ? <Banner tone="error" text={error.message} /> : null}
       {actionError ? <Banner tone="error" text={actionError} /> : null}
-      <McpSetupGuide dashboardUrl={mcpDashboardUrl} />
+      <McpSetupGuide dashboardUrl={mcpDashboardUrl} endpointUrl={mcpEndpointUrl} />
       {createdToken ? (
         <section className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-emerald-950" aria-label="Created MCP token">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1929,14 +1931,13 @@ function McpPage({
   );
 }
 
-function McpSetupGuide({ dashboardUrl }: { dashboardUrl: string }) {
+function McpSetupGuide({ dashboardUrl, endpointUrl }: { dashboardUrl: string; endpointUrl: string }) {
   const agentConfig = `{
   "mcpServers": {
     "github-agent-bridge": {
-      "command": "gab",
-      "args": ["--db", "~/.local/state/github-agent-bridge/bridge.sqlite3", "mcp-serve"],
-      "env": {
-        "GITHUB_AGENT_BRIDGE_MCP_TOKEN": "gab_mcp_..."
+      "url": "${endpointUrl}",
+      "headers": {
+        "Authorization": "Bearer \${GITHUB_AGENT_BRIDGE_MCP_TOKEN}"
       }
     }
   }
@@ -1955,11 +1956,11 @@ function McpSetupGuide({ dashboardUrl }: { dashboardUrl: string }) {
           </div>
           <div className="min-w-0 rounded-md border border-border bg-white p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
-              <TerminalSquare className="h-4 w-4 text-muted" aria-hidden />
-              Transport
+              <ExternalLink className="h-4 w-4 text-muted" aria-hidden />
+              HTTP MCP endpoint
             </div>
-            <p className="mt-1 text-xs text-muted">This release exposes the MCP server over local stdio. It does not publish an HTTP MCP endpoint.</p>
-            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve</pre>
+            <p className="mt-1 text-xs text-muted">Remote agents can connect directly with a bearer token; no local `gab` binary is required on the agent host.</p>
+            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{endpointUrl}</pre>
           </div>
         </div>
         <div className="grid min-w-0 gap-3">
@@ -1968,7 +1969,7 @@ function McpSetupGuide({ dashboardUrl }: { dashboardUrl: string }) {
               <KeyRound className="h-4 w-4 text-muted" aria-hidden />
               Agent config
             </div>
-            <p className="mt-1 text-xs text-muted">Create a token below, then store the one-time secret in the agent environment.</p>
+            <p className="mt-1 text-xs text-muted">Create a token below, then store the one-time secret as `GITHUB_AGENT_BRIDGE_MCP_TOKEN` for the agent.</p>
             <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">{agentConfig}</pre>
           </div>
           <div className="min-w-0 rounded-md border border-border bg-white p-3">
@@ -1978,6 +1979,14 @@ function McpSetupGuide({ dashboardUrl }: { dashboardUrl: string }) {
             </div>
             <p className="mt-1 text-xs text-muted">Ask the agent to use the read-only bridge knowledge server before acting on repository work.</p>
             <pre className="mt-3 max-h-40 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">Use the github-agent-bridge MCP server for repository knowledge. Query list_repositories and list_knowledge before making repository decisions.</pre>
+          </div>
+          <div className="min-w-0 rounded-md border border-border bg-white p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <TerminalSquare className="h-4 w-4 text-muted" aria-hidden />
+              Local fallback
+            </div>
+            <p className="mt-1 text-xs text-muted">Agents running on the bridge host can still use the stdio transport.</p>
+            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve</pre>
           </div>
         </div>
       </div>

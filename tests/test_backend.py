@@ -13,6 +13,7 @@ from github_agent_bridge.backend import DashboardConfig, _encode_session, _is_ad
 from github_agent_bridge.dashboard_data import get_job_detail, job_session, job_session_events, job_session_transcript, list_job_actors, list_jobs, metrics_summary
 from github_agent_bridge.monitor import MonitorReport
 from github_agent_bridge.models import GitHubContext, Notification
+from github_agent_bridge.mcp import create_token
 from github_agent_bridge.observability import record_monitor_observation
 from github_agent_bridge.policy import Policy
 from github_agent_bridge.queue import JobQueue
@@ -948,6 +949,38 @@ def test_dashboard_admin_manages_mcp_tokens(tmp_path):
     assert "token" not in listed.json()["tokens"][0]
     assert revoked.status_code == 200
     assert listed_after_revoke.json()["tokens"] == []
+
+
+def test_http_mcp_uses_bearer_tokens_and_shared_server(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    feedback.add_rule(db, "repo:gisce/erp", "technical_criterion", "Prefer the HTTP MCP endpoint for remote agents.", 0.9)
+    token = create_token(db, "remote agent")["token"]
+    app = create_app(DashboardConfig(db=db, require_auth=False))
+    client = TestClient(app)
+
+    missing = client.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+    invalid = client.post("/api/mcp", headers={"Authorization": "Bearer bad-token"}, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+    response = client.post(
+        "/api/mcp",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "list_knowledge", "arguments": {"repo": "gisce/erp"}},
+        },
+    )
+
+    assert missing.status_code == 401
+    assert missing.json()["detail"] == "mcp_token_required"
+    assert invalid.status_code == 401
+    assert invalid.json()["detail"] == "invalid_mcp_token"
+    assert response.status_code == 200
+    assert response.json()["jsonrpc"] == "2.0"
+    assert response.json()["id"] == 2
+    knowledge = json.loads(response.json()["result"]["content"][0]["text"])
+    assert knowledge["rules"][0]["rule"] == "Prefer the HTTP MCP endpoint for remote agents."
 
 
 def test_dashboard_retry_requires_admin_and_requeues_retryable_job(tmp_path):

@@ -182,8 +182,11 @@ describe("MCP access page", () => {
     expect(screen.getByText("Connect an agent")).toBeInTheDocument();
     expect(screen.getByText("Public dashboard URL")).toBeInTheDocument();
     expect(screen.getByText("https://bridge.example.com/ops/mcp")).toBeInTheDocument();
-    expect(screen.getByText("This release exposes the MCP server over local stdio. It does not publish an HTTP MCP endpoint.")).toBeInTheDocument();
-    expect(screen.getByText(/\"command\": \"gab\"/)).toBeInTheDocument();
+    expect(screen.getByText("https://bridge.example.com/ops/api/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Remote agents can connect directly with a bearer token; no local `gab` binary is required on the agent host.")).toBeInTheDocument();
+    expect(screen.getByText(/\"url\": \"https:\/\/bridge.example.com\/ops\/api\/mcp\"/)).toBeInTheDocument();
+    expect(screen.getByText(/\"Authorization\": \"Bearer/)).toBeInTheDocument();
+    expect(screen.getByText("gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Token name"), "local agent");
     await user.click(screen.getByRole("button", { name: "Create token" }));
