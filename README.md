@@ -38,6 +38,7 @@ flowchart LR
 | **Coalescing** | Duplicate notifications for active threads fold into existing work. |
 | **Policy gates** | Trust, canary scope, actions, routes, and repo roles live in JSON policy. |
 | **Safe rollout** | Replay, shadow, dry-run, canary, then live. |
+| **Agent knowledge MCP** | Local agents can query acquired repository knowledge through an authenticated read-only MCP server. |
 | **Automatic releases** | Conventional commits drive tags, changelog, GitHub Releases, wheel/sdist. |
 
 ## Installation
@@ -165,6 +166,7 @@ See [`docs/shadow-canary.md`](docs/shadow-canary.md).
 | Understand the system shape | [`docs/architecture.md`](docs/architecture.md) |
 | Develop or test changes | [`docs/development.md`](docs/development.md) |
 | Operate the bridge | [`docs/operations.md`](docs/operations.md) |
+| Expose bridge knowledge to local agents | [`docs/mcp.md`](docs/mcp.md) |
 | Configure trust, actions, routes, roles | [`docs/policy-reference.md`](docs/policy-reference.md) |
 | Plan rollout safely | [`docs/shadow-canary.md`](docs/shadow-canary.md) |
 | Understand releases | [`docs/releases.md`](docs/releases.md) |
