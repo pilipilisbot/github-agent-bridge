@@ -178,6 +178,11 @@ describe("MCP access page", () => {
       />,
     );
 
+    expect(screen.getByText("Connect an agent")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.getByText("This release exposes the MCP server over local stdio. It does not publish an HTTP MCP endpoint.")).toBeInTheDocument();
+    expect(screen.getByText(/\"command\": \"gab\"/)).toBeInTheDocument();
+
     await user.type(screen.getByLabelText("Token name"), "local agent");
     await user.click(screen.getByRole("button", { name: "Create token" }));
 
