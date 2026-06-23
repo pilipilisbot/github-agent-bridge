@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.47.0 (2026-06-23)
+
+### Bug Fixes
+
+- Share public MCP dashboard URL
+  ([`d3467e4`](https://github.com/pilipilisbot/github-agent-bridge/commit/d3467e4c016f7d9a67ce4a54a9cd0ee38b7e3330))
+
+- Use MCP stdio message framing
+  ([`99af205`](https://github.com/pilipilisbot/github-agent-bridge/commit/99af2056a58499e61c76bb82d0b4049d6a23f3b9))
+
+### Documentation
+
+- Mention MCP in main README
+  ([`01ba7ce`](https://github.com/pilipilisbot/github-agent-bridge/commit/01ba7ce3f49bc1386876fa03848a67ecc93675f8))
+
+### Features
+
+- Add dashboard MCP token panel
+  ([`3e84f06`](https://github.com/pilipilisbot/github-agent-bridge/commit/3e84f063e67dc40d3393019a02c054f31edafb50))
+
+- Add MCP setup guide
+  ([`b56f38a`](https://github.com/pilipilisbot/github-agent-bridge/commit/b56f38a81d6fc3ea9cc056c340cd16deaf71d2c0))
+
+- Add read-only MCP knowledge server
+  ([`6aa21a6`](https://github.com/pilipilisbot/github-agent-bridge/commit/6aa21a6713a0ed870bd6365ae3a492dac8b56f35))
+
+
 ## v0.46.1 (2026-06-23)
 
 ### Bug Fixes
