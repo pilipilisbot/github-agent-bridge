@@ -31,6 +31,13 @@ Dashboard admins can manage the same records through:
 - `POST /api/mcp/tokens`
 - `DELETE /api/mcp/tokens/{token_id}`
 
+The dashboard MCP page shows a public dashboard URL for sharing this token
+management page with admins. Behind a reverse proxy, set
+`GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL` to the external origin, for example
+`https://bridge.example.com`. If that variable is unset, the dashboard derives
+the origin from `X-Forwarded-Proto`, `X-Forwarded-Host`, and
+`X-Forwarded-Prefix` when the proxy sends them.
+
 ## Run the server
 
 Configure the local MCP client to launch:

@@ -50,6 +50,7 @@ type About = {
 type DashboardStatus = {
   service: string;
   read_only: boolean;
+  dashboard_url?: string;
   admin_actions: string[];
   autoupdate: AutoupdateState;
   metrics?: {
@@ -932,6 +933,7 @@ function App() {
             loading={mcpTokens.isLoading}
             error={mcpTokens.error}
             user={me.data?.user}
+            dashboardUrl={dashboardStatus.data?.dashboard_url}
             now={now}
             onCreate={createMcpToken}
             onRevoke={revokeMcpToken}
@@ -1828,6 +1830,7 @@ function McpPage({
   loading,
   error,
   user,
+  dashboardUrl,
   now,
   onCreate,
   onRevoke,
@@ -1837,6 +1840,7 @@ function McpPage({
   loading: boolean;
   error: Error | null;
   user: UserProfile | undefined;
+  dashboardUrl?: string;
   now: number;
   onCreate: (name: string) => Promise<McpTokenCreateResponse>;
   onRevoke: (tokenId: string) => Promise<void>;
@@ -1848,7 +1852,7 @@ function McpPage({
   const [createdToken, setCreatedToken] = React.useState<McpTokenCreateResponse | null>(null);
   const [actionError, setActionError] = React.useState("");
   const activeTokens = tokens ?? [];
-  const dashboardUrl = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
+  const mcpDashboardUrl = `${(dashboardUrl || (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/$/, "")}/mcp`;
   if (user && !user.is_admin) {
     return (
       <div className="grid min-w-0 gap-4">
@@ -1862,7 +1866,7 @@ function McpPage({
       <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Issue and revoke read-only tokens for local agents." action={<RefreshButton onClick={onRefresh} />} />
       {error ? <Banner tone="error" text={error.message} /> : null}
       {actionError ? <Banner tone="error" text={actionError} /> : null}
-      <McpSetupGuide dashboardUrl={dashboardUrl} />
+      <McpSetupGuide dashboardUrl={mcpDashboardUrl} />
       {createdToken ? (
         <section className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-emerald-950" aria-label="Created MCP token">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1944,9 +1948,9 @@ function McpSetupGuide({ dashboardUrl }: { dashboardUrl: string }) {
           <div className="min-w-0 rounded-md border border-border bg-white p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <ExternalLink className="h-4 w-4 text-muted" aria-hidden />
-              Dashboard URL
+              Public dashboard URL
             </div>
-            <p className="mt-1 text-xs text-muted">Share this page with bridge admins who need to issue or revoke MCP tokens.</p>
+            <p className="mt-1 text-xs text-muted">Share this proxy-aware page URL with bridge admins who need to issue or revoke MCP tokens.</p>
             <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{dashboardUrl}</pre>
           </div>
           <div className="min-w-0 rounded-md border border-border bg-white p-3">

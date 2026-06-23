@@ -80,6 +80,7 @@ class DashboardConfig:
         admin_teams: set[str] | None = None,
         require_auth: bool = True,
         static_dir: str | Path | None = None,
+        public_url: str | None = None,
     ) -> None:
         self.db = Path(db).expanduser()
         self.secret_key = secret_key or os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_SECRET_KEY", "")
@@ -92,6 +93,7 @@ class DashboardConfig:
         self.admin_teams = admin_teams if admin_teams is not None else _csv_env("GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS")
         self.require_auth = require_auth
         self.static_dir = Path(static_dir or os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_STATIC_DIR", Path(__file__).with_name("dashboard_static"))).expanduser()
+        self.public_url = (public_url if public_url is not None else os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL", "")).rstrip("/")
 
     @property
     def oauth_ready(self) -> bool:
@@ -161,6 +163,22 @@ def _record_dashboard_autoupdate_plan(db: str | Path, plan: dict[str, Any], *, a
 
 def _redacted_headers() -> dict[str, str]:
     return {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+
+
+def _dashboard_public_url(request: Request) -> str:
+    cfg: DashboardConfig = request.app.state.dashboard_config
+    if cfg.public_url:
+        return cfg.public_url
+
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+    host = forwarded_host or request.headers.get("host", "").strip()
+    if not host:
+        return str(request.base_url).rstrip("/")
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    scheme = forwarded_proto or request.url.scheme
+    forwarded_prefix = request.headers.get("x-forwarded-prefix", "").split(",", 1)[0].strip().rstrip("/")
+    return f"{scheme}://{host}{forwarded_prefix}"
 
 
 def _sse_headers() -> dict[str, str]:
@@ -430,8 +448,9 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             return redirect
         return dashboard_index()
 
+    @app.get("/mcp")
     @app.get("/mcp/{mcp_path:path}")
-    async def dashboard_mcp(mcp_path: str, request: Request) -> Response:
+    async def dashboard_mcp(request: Request, mcp_path: str = "") -> Response:
         redirect = await require_dashboard_profile_or_login(request)
         if redirect is not None:
             return redirect
@@ -445,7 +464,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         return dashboard_index()
 
     @app.get("/api/status")
-    def api_status(profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+    def api_status(request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         queue = JobQueue(config.db)
         admin_actions = [
             "retry_job",
@@ -462,6 +481,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         return {
             "service": "github-agent-bridge-dashboard",
             "read_only": False,
+            "dashboard_url": _dashboard_public_url(request),
             "admin_actions": admin_actions,
             "metrics": inspect_db_read_only(config.db),
             "autoupdate": load_update_state(queue) if profile.get("is_admin") else {},

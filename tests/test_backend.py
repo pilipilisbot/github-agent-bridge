@@ -61,6 +61,7 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["read_only"] is False
+    assert response.json()["dashboard_url"] == "http://testserver"
     assert response.json()["admin_actions"] == [
         "retry_job",
         "dismiss_job",
@@ -87,6 +88,34 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
         "thinking": None,
         "summary": "n/a",
     }
+
+
+def test_dashboard_status_reports_configured_public_url(tmp_path):
+    app = create_app(DashboardConfig(db=tmp_path / "bridge.sqlite3", require_auth=False, public_url="https://bridge.example.com/"))
+    client = TestClient(app)
+
+    response = client.get("/api/status", headers={"host": "127.0.0.1:8765"})
+
+    assert response.status_code == 200
+    assert response.json()["dashboard_url"] == "https://bridge.example.com"
+
+
+def test_dashboard_status_reports_forwarded_public_url(tmp_path):
+    app = create_app(DashboardConfig(db=tmp_path / "bridge.sqlite3", require_auth=False))
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/status",
+        headers={
+            "host": "127.0.0.1:8765",
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "bridge.example.com",
+            "x-forwarded-prefix": "/ops",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dashboard_url"] == "https://bridge.example.com/ops"
 
 
 def test_dashboard_autoupdate_state_requires_admin_profile(tmp_path):

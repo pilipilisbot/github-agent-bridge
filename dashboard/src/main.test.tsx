@@ -171,6 +171,7 @@ describe("MCP access page", () => {
         loading={false}
         error={null}
         user={admin}
+        dashboardUrl="https://bridge.example.com/ops"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={onCreate}
         onRevoke={onRevoke}
@@ -179,7 +180,8 @@ describe("MCP access page", () => {
     );
 
     expect(screen.getByText("Connect an agent")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Public dashboard URL")).toBeInTheDocument();
+    expect(screen.getByText("https://bridge.example.com/ops/mcp")).toBeInTheDocument();
     expect(screen.getByText("This release exposes the MCP server over local stdio. It does not publish an HTTP MCP endpoint.")).toBeInTheDocument();
     expect(screen.getByText(/\"command\": \"gab\"/)).toBeInTheDocument();
 
@@ -203,6 +205,7 @@ describe("MCP access page", () => {
         loading={false}
         error={null}
         user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
+        dashboardUrl="https://bridge.example.com"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={vi.fn()}
         onRevoke={vi.fn()}
