@@ -61,6 +61,7 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["read_only"] is False
+    assert response.json()["dashboard_url"] == "http://testserver"
     assert response.json()["admin_actions"] == [
         "retry_job",
         "dismiss_job",
@@ -68,6 +69,8 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
         "reject_knowledge_proposal",
         "update_knowledge_rule_scope",
         "delete_knowledge_rule",
+        "create_mcp_token",
+        "revoke_mcp_token",
         "view_autoupdate_plan",
         "refresh_autoupdate_plan",
         "apply_autoupdate",
@@ -85,6 +88,34 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
         "thinking": None,
         "summary": "n/a",
     }
+
+
+def test_dashboard_status_reports_configured_public_url(tmp_path):
+    app = create_app(DashboardConfig(db=tmp_path / "bridge.sqlite3", require_auth=False, public_url="https://bridge.example.com/"))
+    client = TestClient(app)
+
+    response = client.get("/api/status", headers={"host": "127.0.0.1:8765"})
+
+    assert response.status_code == 200
+    assert response.json()["dashboard_url"] == "https://bridge.example.com"
+
+
+def test_dashboard_status_reports_forwarded_public_url(tmp_path):
+    app = create_app(DashboardConfig(db=tmp_path / "bridge.sqlite3", require_auth=False))
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/status",
+        headers={
+            "host": "127.0.0.1:8765",
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "bridge.example.com",
+            "x-forwarded-prefix": "/ops",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dashboard_url"] == "https://bridge.example.com/ops"
 
 
 def test_dashboard_autoupdate_state_requires_admin_profile(tmp_path):
@@ -295,6 +326,21 @@ def test_dashboard_serves_dedicated_knowledge_frontend_route(tmp_path):
     app = create_app(DashboardConfig(db=db, static_dir=static_dir, require_auth=False))
 
     response = TestClient(app).get("/knowledge")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert "root" in response.text
+
+
+def test_dashboard_serves_dedicated_mcp_frontend_route(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><div id=\"root\"></div>", encoding="utf-8")
+    JobQueue(db)
+    app = create_app(DashboardConfig(db=db, static_dir=static_dir, require_auth=False))
+
+    response = TestClient(app).get("/mcp")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
@@ -879,6 +925,29 @@ def test_dashboard_admin_can_change_knowledge_rule_scope(tmp_path):
     assert client.get("/api/knowledge").json()["rules"][0]["scope"] == "global"
     assert client.get("/api/knowledge", params={"repo": "gisce/erp"}).json()["rules"][0]["scope"] == "global"
     assert invalid.status_code == 400
+
+
+def test_dashboard_admin_manages_mcp_tokens(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice"}, admin_users={"alice"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
+
+    forbidden = client.post("/api/mcp/tokens", json={"name": "local agent"})
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"}, is_admin=True)))
+    created = client.post("/api/mcp/tokens", json={"name": "local agent"})
+    listed = client.get("/api/mcp/tokens")
+    revoked = client.delete(f"/api/mcp/tokens/{created.json()['record']['id']}")
+    listed_after_revoke = client.get("/api/mcp/tokens")
+
+    assert forbidden.status_code == 403
+    assert created.status_code == 200
+    assert created.json()["token"].startswith("gab_mcp_")
+    assert listed.json()["tokens"][0]["name"] == "local agent"
+    assert "token" not in listed.json()["tokens"][0]
+    assert revoked.status_code == 200
+    assert listed_after_revoke.json()["tokens"] == []
 
 
 def test_dashboard_retry_requires_admin_and_requeues_retryable_job(tmp_path):

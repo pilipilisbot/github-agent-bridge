@@ -11,6 +11,7 @@ import {
   KnowledgePage,
   KnowledgeProposals,
   KnowledgeRules,
+  McpPage,
   ProductMeta,
   SectionNav,
   StatusBadge,
@@ -23,6 +24,7 @@ import {
   groupSessionEvents,
   groupTranscriptEntries,
   isKnowledgePath,
+  isMcpPath,
   isRetryableStatus,
   isSystemPath,
   metricsSummaryPath,
@@ -55,6 +57,12 @@ describe("dashboard routing and API query helpers", () => {
     expect(isKnowledgePath("/knowledge/extra")).toBe(false);
   });
 
+  it("recognizes the MCP route", () => {
+    expect(isMcpPath("/mcp")).toBe(true);
+    expect(isMcpPath("/mcp/")).toBe(true);
+    expect(isMcpPath("/mcp/tokens")).toBe(false);
+  });
+
   it("recognizes the dedicated system route", () => {
     expect(isSystemPath("/system")).toBe(true);
     expect(isSystemPath("/system/")).toBe(true);
@@ -70,17 +78,21 @@ describe("dashboard routing and API query helpers", () => {
 
   it("shows a knowledge badge when proposed rules need moderation", () => {
     const onNavigate = vi.fn();
-    const { rerender } = render(<SectionNav isDashboardRoute={true} isSystemRoute={false} isKnowledgeRoute={false} knowledgeBadgeCount={2} />);
+    const { rerender } = render(<SectionNav isDashboardRoute={true} isSystemRoute={false} isKnowledgeRoute={false} isMcpRoute={false} knowledgeBadgeCount={2} />);
 
     expect(screen.getByRole("link", { name: /Knowledge/i })).toContainElement(screen.getByLabelText("2 proposed knowledge items"));
     expect(screen.getByRole("link", { name: /Jobs/i })).toHaveClass("bg-primary");
     expect(screen.getByRole("link", { name: /System/i })).not.toHaveClass("bg-primary");
+    expect(screen.getByRole("link", { name: /MCP/i })).not.toHaveClass("bg-primary");
 
-    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={true} isKnowledgeRoute={false} knowledgeBadgeCount={0} onNavigate={onNavigate} />);
+    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={true} isKnowledgeRoute={false} isMcpRoute={false} knowledgeBadgeCount={0} onNavigate={onNavigate} />);
     expect(screen.getByRole("link", { name: /System/i })).toHaveClass("bg-primary");
 
-    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={false} isKnowledgeRoute={true} knowledgeBadgeCount={0} />);
+    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={false} isKnowledgeRoute={true} isMcpRoute={false} knowledgeBadgeCount={0} />);
     expect(screen.queryByLabelText(/proposed knowledge/i)).not.toBeInTheDocument();
+
+    rerender(<SectionNav isDashboardRoute={false} isSystemRoute={false} isKnowledgeRoute={false} isMcpRoute={true} knowledgeBadgeCount={0} />);
+    expect(screen.getByRole("link", { name: /MCP/i })).toHaveClass("bg-primary");
   });
 
   it("uses client-side navigation for dashboard section links", async () => {
@@ -121,6 +133,88 @@ describe("dashboard routing and API query helpers", () => {
     expect(formatRuntimeUsageSeconds(1800)).toBe("30m");
     expect(formatRuntimeUsageSeconds(5400)).toBe("1h 30m");
     expect(formatRuntimeUsageSeconds(7200)).toBe("2h");
+  });
+});
+
+describe("MCP access page", () => {
+  const admin = { login: "admin", avatar_url: "", html_url: "https://github.com/admin", is_admin: true };
+
+  it("lets admins create and revoke MCP tokens", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue({
+      token: "gab_mcp_secret",
+      record: {
+        id: "token-1",
+        name: "local agent",
+        created_at: "2026-06-23T11:00:00Z",
+        last_used_at: null,
+        revoked_at: null,
+        expires_at: null,
+      },
+      detail: "mcp_token_created",
+    });
+    const onRevoke = vi.fn().mockResolvedValue(undefined);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <McpPage
+        tokens={[
+          {
+            id: "token-1",
+            name: "local agent",
+            created_at: "2026-06-23T11:00:00Z",
+            last_used_at: null,
+            revoked_at: null,
+            expires_at: null,
+          },
+        ]}
+        loading={false}
+        error={null}
+        user={admin}
+        dashboardUrl="https://bridge.example.com/ops"
+        now={Date.parse("2026-06-23T11:05:00Z")}
+        onCreate={onCreate}
+        onRevoke={onRevoke}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Connect an agent")).toBeInTheDocument();
+    expect(screen.getByText("Public dashboard URL")).toBeInTheDocument();
+    expect(screen.getByText("https://bridge.example.com/ops/mcp")).toBeInTheDocument();
+    expect(screen.getByText("This release exposes the MCP server over local stdio. It does not publish an HTTP MCP endpoint.")).toBeInTheDocument();
+    expect(screen.getByText(/\"command\": \"gab\"/)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Token name"), "local agent");
+    await user.click(screen.getByRole("button", { name: "Create token" }));
+
+    expect(onCreate).toHaveBeenCalledWith("local agent");
+    expect(await screen.findByText("gab_mcp_secret")).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "Revoke" })[0]);
+
+    expect(confirm).toHaveBeenCalledWith("Revoke this MCP token?");
+    expect(onRevoke).toHaveBeenCalledWith("token-1");
+    confirm.mockRestore();
+  });
+
+  it("keeps MCP token management admin-only", () => {
+    render(
+      <McpPage
+        tokens={[]}
+        loading={false}
+        error={null}
+        user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
+        dashboardUrl="https://bridge.example.com"
+        now={Date.parse("2026-06-23T11:05:00Z")}
+        onCreate={vi.fn()}
+        onRevoke={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Admin access is required to manage MCP tokens.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create token" })).not.toBeInTheDocument();
   });
 });
 

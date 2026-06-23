@@ -19,6 +19,7 @@ from .dispatch import FEEDBACK_LEARNING_RULES, GitHubClient, OpenClawDispatcher,
 from .executor import ExecutorConfig, ExecutorPool
 from .models import Notification, utc_now
 from .monitor import MonitorThresholds, monitor, report_json
+from .mcp import authenticate_token, create_token, list_tokens, revoke_token, serve_stdio
 from .observability import DEFAULT_PROCESS_SAMPLE_RETENTION_SECONDS, configure_sentry
 from .parser import decode_header_value, extract_body_text, is_github_notification_message, parse_auth_results
 from .policy import Policy
@@ -345,6 +346,35 @@ def cmd_feedback_proposals(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp_token_create(args: argparse.Namespace) -> int:
+    JobQueue(args.db)
+    payload = create_token(args.db, args.name, expires_at=args.expires_at)
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_mcp_tokens(args: argparse.Namespace) -> int:
+    JobQueue(args.db)
+    print(json.dumps({"tokens": list_tokens(args.db, include_revoked=args.include_revoked)}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_mcp_token_revoke(args: argparse.Namespace) -> int:
+    JobQueue(args.db)
+    revoked = revoke_token(args.db, args.token_id)
+    print(json.dumps({"token_id": args.token_id, "revoked": revoked}, ensure_ascii=False))
+    return 0 if revoked else 1
+
+
+def cmd_mcp_serve(args: argparse.Namespace) -> int:
+    JobQueue(args.db)
+    token = args.token or os.getenv("GITHUB_AGENT_BRIDGE_MCP_TOKEN", "")
+    if not authenticate_token(args.db, token):
+        print("invalid MCP token", file=sys.stderr)
+        return 2
+    return serve_stdio(args.db)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     p.add_argument("--db", default=DEFAULT_DB)
@@ -463,6 +493,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--status", choices=["", "approved", "rejected", "proposed", "error"], default="")
     s.add_argument("--limit", type=int, default=20)
     s.set_defaults(func=cmd_feedback_proposals)
+    s = sub.add_parser("mcp-token-create", help="create an MCP access token")
+    s.add_argument("--name", required=True, help="human-readable token name")
+    s.add_argument("--expires-at", default=None, help="optional UTC ISO timestamp after which the token is rejected")
+    s.set_defaults(func=cmd_mcp_token_create)
+    s = sub.add_parser("mcp-tokens", help="list MCP access token records without token secrets")
+    s.add_argument("--include-revoked", action="store_true")
+    s.set_defaults(func=cmd_mcp_tokens)
+    s = sub.add_parser("mcp-token-revoke", help="revoke an MCP access token")
+    s.add_argument("token_id")
+    s.set_defaults(func=cmd_mcp_token_revoke)
+    s = sub.add_parser("mcp-serve", help="run the authenticated stdio MCP server")
+    s.add_argument("--token", default="", help="MCP token; defaults to GITHUB_AGENT_BRIDGE_MCP_TOKEN")
+    s.set_defaults(func=cmd_mcp_serve)
     return p
 
 
@@ -484,6 +527,8 @@ def _sentry_service(args: argparse.Namespace) -> str:
         return "feedback"
     if command == "cmd_update":
         return "update"
+    if command.startswith("cmd_mcp"):
+        return "mcp"
     return "cli"
 
 

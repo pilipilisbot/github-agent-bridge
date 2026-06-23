@@ -62,6 +62,7 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_ORGS=
 GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_TEAMS=
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_USERS=your-github-login
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS=
+GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=
 EOF
 chmod 600 ~/.config/github-agent-bridge/env
 ```
@@ -86,6 +87,9 @@ Use at least one authorization allowlist:
   allowed to run guarded dashboard actions such as retrying a job.
 - `GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS`: comma-separated GitHub teams in
   `org/team-slug` form whose members may run guarded dashboard actions.
+- `GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`: optional external dashboard
+  origin, for example `https://bridge.example.com`, used in shareable dashboard
+  links when the service runs behind nginx or another reverse proxy.
 
 If all allowlists are empty, any authenticated GitHub user is accepted. That is
 only appropriate for isolated local development.
