@@ -172,6 +172,7 @@ describe("MCP access page", () => {
         error={null}
         user={admin}
         dashboardUrl="https://bridge.example.com/ops"
+        dashboardUrlSource="configured"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={onCreate}
         onRevoke={onRevoke}
@@ -181,8 +182,10 @@ describe("MCP access page", () => {
 
     expect(screen.getByText("Connect an agent")).toBeInTheDocument();
     expect(screen.getByText("Public dashboard URL")).toBeInTheDocument();
+    expect(screen.getByText("Configured public URL")).toBeInTheDocument();
     expect(screen.getByText("https://bridge.example.com/ops/mcp")).toBeInTheDocument();
     expect(screen.getByText("https://bridge.example.com/ops/api/mcp")).toBeInTheDocument();
+    expect(screen.queryByText(/Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL/)).not.toBeInTheDocument();
     expect(screen.getByText("Remote agents can connect directly with a bearer token; no local `gab` binary is required on the agent host.")).toBeInTheDocument();
     expect(screen.getByText(/\"url\": \"https:\/\/bridge.example.com\/ops\/api\/mcp\"/)).toBeInTheDocument();
     expect(screen.getByText(/\"Authorization\": \"Bearer/)).toBeInTheDocument();
@@ -209,6 +212,7 @@ describe("MCP access page", () => {
         error={null}
         user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
         dashboardUrl="https://bridge.example.com"
+        dashboardUrlSource="configured"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={vi.fn()}
         onRevoke={vi.fn()}
@@ -218,6 +222,27 @@ describe("MCP access page", () => {
 
     expect(screen.getByText("Admin access is required to manage MCP tokens.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create token" })).not.toBeInTheDocument();
+  });
+
+  it("warns admins before sharing a request-derived MCP URL", () => {
+    render(
+      <McpPage
+        tokens={[]}
+        loading={false}
+        error={null}
+        user={admin}
+        dashboardUrl="http://127.0.0.1:8765"
+        dashboardUrlSource="request"
+        now={Date.parse("2026-06-23T11:05:00Z")}
+        onCreate={vi.fn()}
+        onRevoke={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Current request URL")).toBeInTheDocument();
+    expect(screen.getByText("http://127.0.0.1:8765/mcp")).toBeInTheDocument();
+    expect(screen.getByText(/Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL/)).toBeInTheDocument();
   });
 });
 

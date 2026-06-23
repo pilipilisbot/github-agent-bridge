@@ -166,19 +166,25 @@ def _redacted_headers() -> dict[str, str]:
 
 
 def _dashboard_public_url(request: Request) -> str:
+    url, _ = _dashboard_public_url_with_source(request)
+    return url
+
+
+def _dashboard_public_url_with_source(request: Request) -> tuple[str, str]:
     cfg: DashboardConfig = request.app.state.dashboard_config
     if cfg.public_url:
-        return cfg.public_url
+        return cfg.public_url, "configured"
 
     forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
     host = forwarded_host or request.headers.get("host", "").strip()
     if not host:
-        return str(request.base_url).rstrip("/")
+        return str(request.base_url).rstrip("/"), "request"
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     scheme = forwarded_proto or request.url.scheme
     forwarded_prefix = request.headers.get("x-forwarded-prefix", "").split(",", 1)[0].strip().rstrip("/")
-    return f"{scheme}://{host}{forwarded_prefix}"
+    source = "forwarded" if forwarded_host or forwarded_proto or forwarded_prefix else "request"
+    return f"{scheme}://{host}{forwarded_prefix}", source
 
 
 def _sse_headers() -> dict[str, str]:
@@ -474,6 +480,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.get("/api/status")
     def api_status(request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         queue = JobQueue(config.db)
+        dashboard_url, dashboard_url_source = _dashboard_public_url_with_source(request)
         admin_actions = [
             "retry_job",
             "dismiss_job",
@@ -489,7 +496,8 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         return {
             "service": "github-agent-bridge-dashboard",
             "read_only": False,
-            "dashboard_url": _dashboard_public_url(request),
+            "dashboard_url": dashboard_url,
+            "dashboard_url_source": dashboard_url_source,
             "admin_actions": admin_actions,
             "metrics": inspect_db_read_only(config.db),
             "autoupdate": load_update_state(queue) if profile.get("is_admin") else {},

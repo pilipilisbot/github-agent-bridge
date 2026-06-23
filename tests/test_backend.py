@@ -63,6 +63,7 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
     assert response.status_code == 200
     assert response.json()["read_only"] is False
     assert response.json()["dashboard_url"] == "http://testserver"
+    assert response.json()["dashboard_url_source"] == "request"
     assert response.json()["admin_actions"] == [
         "retry_job",
         "dismiss_job",
@@ -99,6 +100,7 @@ def test_dashboard_status_reports_configured_public_url(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["dashboard_url"] == "https://bridge.example.com"
+    assert response.json()["dashboard_url_source"] == "configured"
 
 
 def test_dashboard_status_reports_forwarded_public_url(tmp_path):
@@ -117,6 +119,7 @@ def test_dashboard_status_reports_forwarded_public_url(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["dashboard_url"] == "https://bridge.example.com/ops"
+    assert response.json()["dashboard_url_source"] == "forwarded"
 
 
 def test_dashboard_autoupdate_state_requires_admin_profile(tmp_path):

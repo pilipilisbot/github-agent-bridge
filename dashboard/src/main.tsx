@@ -51,6 +51,7 @@ type DashboardStatus = {
   service: string;
   read_only: boolean;
   dashboard_url?: string;
+  dashboard_url_source?: "configured" | "forwarded" | "request";
   admin_actions: string[];
   autoupdate: AutoupdateState;
   metrics?: {
@@ -934,6 +935,7 @@ function App() {
             error={mcpTokens.error}
             user={me.data?.user}
             dashboardUrl={dashboardStatus.data?.dashboard_url}
+            dashboardUrlSource={dashboardStatus.data?.dashboard_url_source}
             now={now}
             onCreate={createMcpToken}
             onRevoke={revokeMcpToken}
@@ -1831,6 +1833,7 @@ function McpPage({
   error,
   user,
   dashboardUrl,
+  dashboardUrlSource,
   now,
   onCreate,
   onRevoke,
@@ -1841,6 +1844,7 @@ function McpPage({
   error: Error | null;
   user: UserProfile | undefined;
   dashboardUrl?: string;
+  dashboardUrlSource?: "configured" | "forwarded" | "request";
   now: number;
   onCreate: (name: string) => Promise<McpTokenCreateResponse>;
   onRevoke: (tokenId: string) => Promise<void>;
@@ -1868,7 +1872,7 @@ function McpPage({
       <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Issue and revoke read-only tokens for agents." action={<RefreshButton onClick={onRefresh} />} />
       {error ? <Banner tone="error" text={error.message} /> : null}
       {actionError ? <Banner tone="error" text={actionError} /> : null}
-      <McpSetupGuide dashboardUrl={mcpDashboardUrl} endpointUrl={mcpEndpointUrl} />
+      <McpSetupGuide dashboardUrl={mcpDashboardUrl} endpointUrl={mcpEndpointUrl} dashboardUrlSource={dashboardUrlSource ?? "request"} />
       {createdToken ? (
         <section className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-emerald-950" aria-label="Created MCP token">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1931,7 +1935,9 @@ function McpPage({
   );
 }
 
-function McpSetupGuide({ dashboardUrl, endpointUrl }: { dashboardUrl: string; endpointUrl: string }) {
+function McpSetupGuide({ dashboardUrl, endpointUrl, dashboardUrlSource }: { dashboardUrl: string; endpointUrl: string; dashboardUrlSource: "configured" | "forwarded" | "request" }) {
+  const sourceLabel = dashboardUrlSource === "configured" ? "Configured public URL" : dashboardUrlSource === "forwarded" ? "Forwarded public URL" : "Current request URL";
+  const needsPublicUrlConfig = dashboardUrlSource === "request";
   const agentConfig = `{
   "mcpServers": {
     "github-agent-bridge": {
@@ -1944,14 +1950,18 @@ function McpSetupGuide({ dashboardUrl, endpointUrl }: { dashboardUrl: string; en
 }`;
   return (
     <Panel title="Connect an agent">
+      {needsPublicUrlConfig ? (
+        <Banner tone="warning" text="Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL, or forward X-Forwarded-* headers from the proxy, before sharing this URL with remote agents." />
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid min-w-0 gap-3">
           <div className="min-w-0 rounded-md border border-border bg-white p-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
+            <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
               <ExternalLink className="h-4 w-4 text-muted" aria-hidden />
               Public dashboard URL
+              <span className="rounded-sm border border-border bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-normal text-muted">{sourceLabel}</span>
             </div>
-            <p className="mt-1 text-xs text-muted">Share this proxy-aware page URL with bridge admins who need to issue or revoke MCP tokens.</p>
+            <p className="mt-1 text-xs text-muted">Share this page URL with bridge admins only after it resolves to the external dashboard origin.</p>
             <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{dashboardUrl}</pre>
           </div>
           <div className="min-w-0 rounded-md border border-border bg-white p-3">
@@ -3327,8 +3337,8 @@ function EmptyState({ text }: { text: string }) {
   return <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted">{text}</div>;
 }
 
-function Banner({ tone, text }: { tone: "error"; text: string }) {
-  return <div className={cn("rounded-md border p-3 text-sm", tone === "error" && "border-red-300 bg-red-50 text-red-700")}>{text}</div>;
+function Banner({ tone, text }: { tone: "error" | "warning"; text: string }) {
+  return <div className={cn("rounded-md border p-3 text-sm", tone === "error" && "border-red-300 bg-red-50 text-red-700", tone === "warning" && "border-amber-300 bg-amber-50 text-amber-800")}>{text}</div>;
 }
 
 function RefreshButton({ onClick, compactOnMobile = false }: { onClick: () => void; compactOnMobile?: boolean }) {
