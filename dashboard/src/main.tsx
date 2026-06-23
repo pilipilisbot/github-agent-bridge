@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
@@ -367,6 +367,21 @@ type KnowledgeResponse = {
 
 type KnowledgeTab = "proposals" | "rules" | "events";
 
+type McpTokenRecord = {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  expires_at: string | null;
+};
+
+type McpTokenCreateResponse = {
+  token: string;
+  record: McpTokenRecord;
+  detail: string;
+};
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -659,6 +674,10 @@ function isKnowledgePath(pathname = window.location.pathname) {
   return /^\/knowledge\/?$/.test(pathname);
 }
 
+function isMcpPath(pathname = window.location.pathname) {
+  return /^\/mcp\/?$/.test(pathname);
+}
+
 function isSystemPath(pathname = window.location.pathname) {
   return /^\/system\/?$/.test(pathname);
 }
@@ -684,8 +703,9 @@ function App() {
   const jobRouteId = selectedJobIdFromPath(pathname);
   const isJobDetailRoute = jobRouteId !== null;
   const isKnowledgeRoute = isKnowledgePath(pathname);
+  const isMcpRoute = isMcpPath(pathname);
   const isSystemRoute = isSystemPath(pathname);
-  const isDashboardRoute = !isJobDetailRoute && !isKnowledgeRoute && !isSystemRoute;
+  const isDashboardRoute = !isJobDetailRoute && !isKnowledgeRoute && !isMcpRoute && !isSystemRoute;
   const selectedJobId = jobRouteId;
   const metrics = useQuery({ queryKey: ["metrics", dashboardTimeZone], queryFn: () => api<{ metrics: MetricsSummary }>(metricsSummaryPath()), enabled: isDashboardRoute || isSystemRoute });
   const dashboardStatus = useQuery({ queryKey: ["dashboard-status"], queryFn: () => api<DashboardStatus>("/api/status") });
@@ -705,6 +725,11 @@ function App() {
     queryKey: ["knowledge", knowledgeRepo, knowledgeStatus],
     queryFn: () => api<KnowledgeResponse>(buildKnowledgeQuery(knowledgeRepo, knowledgeStatus)),
     enabled: isKnowledgeRoute,
+  });
+  const mcpTokens = useQuery({
+    queryKey: ["mcp-tokens"],
+    queryFn: () => api<{ tokens: McpTokenRecord[] }>("/api/mcp/tokens"),
+    enabled: isMcpRoute && Boolean(me.data?.user?.is_admin),
   });
   const detail = useQuery({
     queryKey: ["job", selectedJobId],
@@ -755,6 +780,19 @@ function App() {
       body: JSON.stringify({ scope }),
     });
     queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+  }, [queryClient]);
+  const createMcpToken = React.useCallback(async (name: string) => {
+    const created = await api<McpTokenCreateResponse>("/api/mcp/tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["mcp-tokens"] });
+    return created;
+  }, [queryClient]);
+  const revokeMcpToken = React.useCallback(async (tokenId: string) => {
+    await api<{ detail: string }>(`/api/mcp/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" });
+    queryClient.invalidateQueries({ queryKey: ["mcp-tokens"] });
   }, [queryClient]);
   const runAutoupdateAction = React.useCallback(async (action: "refresh" | "apply" | "complete") => {
     const path = {
@@ -854,7 +892,7 @@ function App() {
       </header>
 
       <main className="mx-auto grid w-full max-w-[1440px] gap-4 px-3 py-4 sm:px-4 md:px-6 md:py-5">
-        <SectionNav isDashboardRoute={isDashboardRoute} isSystemRoute={isSystemRoute} isKnowledgeRoute={isKnowledgeRoute} knowledgeBadgeCount={dashboardStatus.data?.metrics?.knowledge?.proposed ?? 0} onNavigate={navigateDashboard} />
+        <SectionNav isDashboardRoute={isDashboardRoute} isSystemRoute={isSystemRoute} isKnowledgeRoute={isKnowledgeRoute} isMcpRoute={isMcpRoute} knowledgeBadgeCount={dashboardStatus.data?.metrics?.knowledge?.proposed ?? 0} onNavigate={navigateDashboard} />
         {jobRouteId !== null ? (
           <JobDetailPage
             jobId={jobRouteId}
@@ -887,6 +925,17 @@ function App() {
             onUpdateRuleScope={updateKnowledgeRuleScope}
             onDeleteRule={deleteKnowledgeRule}
             onRefresh={() => knowledge.refetch()}
+          />
+        ) : isMcpRoute ? (
+          <McpPage
+            tokens={mcpTokens.data?.tokens}
+            loading={mcpTokens.isLoading}
+            error={mcpTokens.error}
+            user={me.data?.user}
+            now={now}
+            onCreate={createMcpToken}
+            onRevoke={revokeMcpToken}
+            onRefresh={() => mcpTokens.refetch()}
           />
         ) : isSystemRoute ? (
           <SystemPage
@@ -1161,12 +1210,14 @@ function SectionNav({
   isDashboardRoute,
   isSystemRoute = false,
   isKnowledgeRoute,
+  isMcpRoute = false,
   knowledgeBadgeCount = 0,
   onNavigate,
 }: {
   isDashboardRoute: boolean;
   isSystemRoute?: boolean;
   isKnowledgeRoute: boolean;
+  isMcpRoute?: boolean;
   knowledgeBadgeCount?: number;
   onNavigate?: (path: string) => void;
 }) {
@@ -1194,6 +1245,10 @@ function SectionNav({
             {knowledgeBadgeCount}
           </span>
         ) : null}
+      </SectionLink>
+      <SectionLink href="/mcp" active={isMcpRoute} onNavigate={onNavigate}>
+        <KeyRound className="h-4 w-4" aria-hidden />
+        <span>MCP</span>
       </SectionLink>
     </nav>
   );
@@ -1249,7 +1304,7 @@ function SystemPage({
 function SectionLink({ href, active, children, onNavigate }: { href: string; active: boolean; children: React.ReactNode; onNavigate?: (path: string) => void }) {
   return (
     <a
-      className={cn("inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-semibold sm:flex-none", active ? "bg-primary text-white shadow-sm" : "text-muted hover:bg-slate-50 hover:text-foreground")}
+      className={cn("inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-1.5 text-xs font-semibold sm:flex-none sm:gap-1.5 sm:px-3 sm:text-sm [&>span]:truncate [&>svg]:shrink-0", active ? "bg-primary text-white shadow-sm" : "text-muted hover:bg-slate-50 hover:text-foreground")}
       href={href}
       onClick={(event) => {
         if (!onNavigate || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
@@ -1765,6 +1820,177 @@ function KnowledgeEvents({ events, loading, now }: { events: KnowledgeEvent[]; l
         );
       })}
     </div>
+  );
+}
+
+function McpPage({
+  tokens,
+  loading,
+  error,
+  user,
+  now,
+  onCreate,
+  onRevoke,
+  onRefresh,
+}: {
+  tokens: McpTokenRecord[] | undefined;
+  loading: boolean;
+  error: Error | null;
+  user: UserProfile | undefined;
+  now: number;
+  onCreate: (name: string) => Promise<McpTokenCreateResponse>;
+  onRevoke: (tokenId: string) => Promise<void>;
+  onRefresh: () => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [revokingId, setRevokingId] = React.useState<string | null>(null);
+  const [createdToken, setCreatedToken] = React.useState<McpTokenCreateResponse | null>(null);
+  const [actionError, setActionError] = React.useState("");
+  const activeTokens = tokens ?? [];
+  if (user && !user.is_admin) {
+    return (
+      <div className="grid min-w-0 gap-4">
+        <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Read-only local-agent access is limited to dashboard admins." action={<RefreshButton onClick={onRefresh} />} />
+        <EmptyState text="Admin access is required to manage MCP tokens." />
+      </div>
+    );
+  }
+  return (
+    <div className="grid min-w-0 gap-4">
+      <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Issue and revoke read-only tokens for local agents." action={<RefreshButton onClick={onRefresh} />} />
+      {error ? <Banner tone="error" text={error.message} /> : null}
+      {actionError ? <Banner tone="error" text={actionError} /> : null}
+      {createdToken ? (
+        <section className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-emerald-950" aria-label="Created MCP token">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">Token created</h2>
+              <p className="mt-1 text-xs text-emerald-800">This secret is shown once. Store it in the local agent environment before leaving this page.</p>
+            </div>
+            <button className="inline-flex h-8 items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-900 hover:bg-emerald-100" type="button" onClick={() => setCreatedToken(null)}>
+              <X className="h-4 w-4" aria-hidden />
+              Hide
+            </button>
+          </div>
+          <pre className="mt-3 overflow-auto rounded bg-emerald-950 px-3 py-2 font-mono text-xs text-emerald-50">{createdToken.token}</pre>
+        </section>
+      ) : null}
+      <Panel title="Create token">
+        <form
+          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const cleanName = name.trim();
+            if (!cleanName) return;
+            setCreating(true);
+            setActionError("");
+            try {
+              const created = await onCreate(cleanName);
+              setCreatedToken(created);
+              setName("");
+            } catch (err) {
+              setActionError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setCreating(false);
+            }
+          }}
+        >
+          <Field label="Token name">
+            <input className="control" value={name} placeholder="local agent" disabled={creating} onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <button className="inline-flex h-9 items-center justify-center gap-2 self-end rounded-md bg-primary px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={creating || !name.trim()}>
+            <KeyRound className="h-4 w-4" aria-hidden />
+            {creating ? "Creating..." : "Create token"}
+          </button>
+        </form>
+      </Panel>
+      <Panel title="Active tokens">
+        <McpTokenList tokens={activeTokens} loading={loading} now={now} revokingId={revokingId} onRevoke={async (tokenId) => {
+          if (!window.confirm("Revoke this MCP token?")) return;
+          setRevokingId(tokenId);
+          setActionError("");
+          try {
+            await onRevoke(tokenId);
+          } catch (err) {
+            setActionError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setRevokingId(null);
+          }
+        }} />
+      </Panel>
+    </div>
+  );
+}
+
+function PageTitle({ icon, title, subtitle, action }: { icon: React.ReactNode; title: string; subtitle: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          {icon}
+          {title}
+        </h2>
+        <p className="text-xs text-muted">{subtitle}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: McpTokenRecord[]; loading: boolean; now: number; revokingId: string | null; onRevoke: (tokenId: string) => Promise<void> }) {
+  if (loading && tokens.length === 0) return <EmptyState text="Loading MCP tokens..." />;
+  if (tokens.length === 0) return <EmptyState text="No active MCP tokens." />;
+  return (
+    <>
+      <div className="grid gap-2 md:hidden">
+        {tokens.map((token) => (
+          <article key={token.id} className="grid min-w-0 gap-3 rounded-md border border-border bg-white p-3">
+            <div className="min-w-0">
+              <h3 className="break-words text-sm font-semibold [overflow-wrap:anywhere]">{token.name}</h3>
+              <div className="mt-1 break-all font-mono text-xs text-muted">{token.id}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <MiniStat label="Created" value={<TimeText value={token.created_at} relative now={now} />} />
+              <MiniStat label="Last used" value={token.last_used_at ? <TimeText value={token.last_used_at} relative now={now} /> : "never"} />
+            </div>
+            <button className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" type="button" disabled={revokingId === token.id} onClick={() => onRevoke(token.id)}>
+              <Trash2 className="h-4 w-4" aria-hidden />
+              {revokingId === token.id ? "Revoking..." : "Revoke"}
+            </button>
+          </article>
+        ))}
+      </div>
+      <div className="hidden overflow-auto rounded-md border border-border md:block">
+        <table className="min-w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-border bg-slate-50 text-left text-xs text-muted">
+              <th className="px-3 py-2 font-semibold">Name</th>
+              <th className="px-3 py-2 font-semibold">Created</th>
+              <th className="px-3 py-2 font-semibold">Last used</th>
+              <th className="px-3 py-2 font-semibold">ID</th>
+              <th className="px-3 py-2 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tokens.map((token) => (
+              <tr key={token.id} className="border-b border-border last:border-b-0">
+                <td className="px-3 py-3 font-semibold">{token.name}</td>
+                <td className="px-3 py-3 font-mono text-xs"><TimeText value={token.created_at} relative now={now} /></td>
+                <td className="px-3 py-3 font-mono text-xs">{token.last_used_at ? <TimeText value={token.last_used_at} relative now={now} /> : "never"}</td>
+                <td className="px-3 py-3 font-mono text-xs text-muted">{token.id}</td>
+                <td className="px-3 py-3 text-right">
+                  <button className="inline-flex h-8 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" type="button" disabled={revokingId === token.id} onClick={() => onRevoke(token.id)}>
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                    {revokingId === token.id ? "Revoking..." : "Revoke"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -3066,10 +3292,13 @@ export {
   KnowledgePage,
   KnowledgeProposals,
   KnowledgeRules,
+  McpPage,
+  McpTokenList,
   buildJobQuery,
   buildKnowledgeQuery,
   changelogMarkdown,
   isKnowledgePath,
+  isMcpPath,
   isSystemPath,
   isRetryableStatus,
   groupSessionEvents,

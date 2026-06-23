@@ -430,6 +430,13 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             return redirect
         return dashboard_index()
 
+    @app.get("/mcp/{mcp_path:path}")
+    async def dashboard_mcp(mcp_path: str, request: Request) -> Response:
+        redirect = await require_dashboard_profile_or_login(request)
+        if redirect is not None:
+            return redirect
+        return dashboard_index()
+
     @app.get("/system/{system_path:path}")
     async def dashboard_system(system_path: str, request: Request) -> Response:
         redirect = await require_dashboard_profile_or_login(request)
