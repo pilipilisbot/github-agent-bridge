@@ -186,10 +186,11 @@ describe("MCP access page", () => {
     expect(screen.getByText("https://bridge.example.com/ops/mcp")).toBeInTheDocument();
     expect(screen.getByText("https://bridge.example.com/ops/api/mcp")).toBeInTheDocument();
     expect(screen.queryByText(/Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL/)).not.toBeInTheDocument();
-    expect(screen.getByText("Remote agents can connect directly with a bearer token; no local `gab` binary is required on the agent host.")).toBeInTheDocument();
+    expect(screen.getByText("Remote agents connect directly with a bearer token; no local `gab` binary is required on the agent host.")).toBeInTheDocument();
     expect(screen.getByText(/\"url\": \"https:\/\/bridge.example.com\/ops\/api\/mcp\"/)).toBeInTheDocument();
     expect(screen.getByText(/\"Authorization\": \"Bearer/)).toBeInTheDocument();
-    expect(screen.getByText("gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve")).toBeInTheDocument();
+    expect(screen.queryByText("Local fallback")).not.toBeInTheDocument();
+    expect(screen.queryByText(/mcp-serve/)).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Token name"), "local agent");
     await user.click(screen.getByRole("button", { name: "Create token" }));
@@ -224,7 +225,7 @@ describe("MCP access page", () => {
     expect(screen.queryByRole("button", { name: "Create token" })).not.toBeInTheDocument();
   });
 
-  it("warns admins before sharing a request-derived MCP URL", () => {
+  it("requires a configured public URL before showing a remote MCP endpoint", () => {
     render(
       <McpPage
         tokens={[]}
@@ -240,9 +241,12 @@ describe("MCP access page", () => {
       />,
     );
 
-    expect(screen.getByText("Current request URL")).toBeInTheDocument();
-    expect(screen.getByText("http://127.0.0.1:8765/mcp")).toBeInTheDocument();
-    expect(screen.getByText(/Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL/)).toBeInTheDocument();
+    expect(screen.getByText("Needs public URL")).toBeInTheDocument();
+    expect(screen.getByText("Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL or forward X-Forwarded-* headers")).toBeInTheDocument();
+    expect(screen.getByText("Public dashboard URL required before connecting remote agents")).toBeInTheDocument();
+    expect(screen.queryByText("http://127.0.0.1:8765/mcp")).not.toBeInTheDocument();
+    expect(screen.queryByText("http://127.0.0.1:8765/api/mcp")).not.toBeInTheDocument();
+    expect(screen.getByText(/\"url\": \"https:\/\/bridge.example.com\/api\/mcp\"/)).toBeInTheDocument();
   });
 });
 

@@ -1936,12 +1936,15 @@ function McpPage({
 }
 
 function McpSetupGuide({ dashboardUrl, endpointUrl, dashboardUrlSource }: { dashboardUrl: string; endpointUrl: string; dashboardUrlSource: "configured" | "forwarded" | "request" }) {
-  const sourceLabel = dashboardUrlSource === "configured" ? "Configured public URL" : dashboardUrlSource === "forwarded" ? "Forwarded public URL" : "Current request URL";
+  const sourceLabel = dashboardUrlSource === "configured" ? "Configured public URL" : dashboardUrlSource === "forwarded" ? "Forwarded public URL" : "Needs public URL";
   const needsPublicUrlConfig = dashboardUrlSource === "request";
+  const displayDashboardUrl = needsPublicUrlConfig ? "Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL or forward X-Forwarded-* headers" : dashboardUrl;
+  const displayEndpointUrl = needsPublicUrlConfig ? "Public dashboard URL required before connecting remote agents" : endpointUrl;
+  const configEndpointUrl = needsPublicUrlConfig ? "https://bridge.example.com/api/mcp" : endpointUrl;
   const agentConfig = `{
   "mcpServers": {
     "github-agent-bridge": {
-      "url": "${endpointUrl}",
+      "url": "${configEndpointUrl}",
       "headers": {
         "Authorization": "Bearer \${GITHUB_AGENT_BRIDGE_MCP_TOKEN}"
       }
@@ -1951,7 +1954,7 @@ function McpSetupGuide({ dashboardUrl, endpointUrl, dashboardUrlSource }: { dash
   return (
     <Panel title="Connect an agent">
       {needsPublicUrlConfig ? (
-        <Banner tone="warning" text="Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL, or forward X-Forwarded-* headers from the proxy, before sharing this URL with remote agents." />
+        <Banner tone="warning" text="Set GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL, or forward X-Forwarded-* headers from the proxy, before connecting remote agents." />
       ) : null}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid min-w-0 gap-3">
@@ -1962,15 +1965,15 @@ function McpSetupGuide({ dashboardUrl, endpointUrl, dashboardUrlSource }: { dash
               <span className="rounded-sm border border-border bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-normal text-muted">{sourceLabel}</span>
             </div>
             <p className="mt-1 text-xs text-muted">Share this page URL with bridge admins only after it resolves to the external dashboard origin.</p>
-            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{dashboardUrl}</pre>
+            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{displayDashboardUrl}</pre>
           </div>
           <div className="min-w-0 rounded-md border border-border bg-white p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <ExternalLink className="h-4 w-4 text-muted" aria-hidden />
               HTTP MCP endpoint
             </div>
-            <p className="mt-1 text-xs text-muted">Remote agents can connect directly with a bearer token; no local `gab` binary is required on the agent host.</p>
-            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{endpointUrl}</pre>
+            <p className="mt-1 text-xs text-muted">Remote agents connect directly with a bearer token; no local `gab` binary is required on the agent host.</p>
+            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">{displayEndpointUrl}</pre>
           </div>
         </div>
         <div className="grid min-w-0 gap-3">
@@ -1989,14 +1992,6 @@ function McpSetupGuide({ dashboardUrl, endpointUrl, dashboardUrlSource }: { dash
             </div>
             <p className="mt-1 text-xs text-muted">Ask the agent to use the read-only bridge knowledge server before acting on repository work.</p>
             <pre className="mt-3 max-h-40 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">Use the github-agent-bridge MCP server for repository knowledge. Query list_repositories and list_knowledge before making repository decisions.</pre>
-          </div>
-          <div className="min-w-0 rounded-md border border-border bg-white p-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <TerminalSquare className="h-4 w-4 text-muted" aria-hidden />
-              Local fallback
-            </div>
-            <p className="mt-1 text-xs text-muted">Agents running on the bridge host can still use the stdio transport.</p>
-            <pre className="mt-3 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100">gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve</pre>
           </div>
         </div>
       </div>

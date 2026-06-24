@@ -2,8 +2,7 @@
 
 `github-agent-bridge` includes an authenticated read-only MCP server for agents
 that need access to acquired bridge knowledge. The dashboard exposes the server
-over HTTP for remote agents, and the CLI keeps a stdio transport for agents that
-run on the bridge host.
+over HTTP so agents can connect without installing or launching `gab`.
 
 ## Create a token
 
@@ -68,18 +67,6 @@ For clients that accept JSON MCP server config:
   }
 }
 ```
-
-## Run the stdio fallback
-
-Configure the local MCP client to launch:
-
-```bash
-gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve
-```
-
-`mcp-serve` is only needed for agents that run on the bridge host and can launch
-the `gab` binary. It rejects startup unless `GITHUB_AGENT_BRIDGE_MCP_TOKEN` or
-`--token` matches an active token in the bridge database.
 
 ## Exposed capabilities
 
