@@ -1,7 +1,8 @@
 # MCP server
 
-`github-agent-bridge` includes a stdio MCP server for local agents that need
-read-only access to acquired bridge knowledge.
+`github-agent-bridge` includes an authenticated read-only MCP server for agents
+that need access to acquired bridge knowledge. The dashboard exposes the server
+over HTTP so agents can connect without installing or launching `gab`.
 
 ## Create a token
 
@@ -31,23 +32,41 @@ Dashboard admins can manage the same records through:
 - `POST /api/mcp/tokens`
 - `DELETE /api/mcp/tokens/{token_id}`
 
-The dashboard MCP page shows a public dashboard URL for sharing this token
-management page with admins. Behind a reverse proxy, set
+The dashboard MCP page shows both a public dashboard URL for token management
+and the public MCP endpoint URL. Behind a reverse proxy, set
 `GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL` to the external origin, for example
 `https://bridge.example.com`. If that variable is unset, the dashboard derives
 the origin from `X-Forwarded-Proto`, `X-Forwarded-Host`, and
 `X-Forwarded-Prefix` when the proxy sends them.
 
-## Run the server
+## Connect over HTTP
 
-Configure the local MCP client to launch:
+Remote agents should connect to the dashboard endpoint:
 
-```bash
-gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-serve
+```text
+https://bridge.example.com/api/mcp
 ```
 
-`mcp-serve` rejects startup unless `GITHUB_AGENT_BRIDGE_MCP_TOKEN` or
-`--token` matches an active token in the bridge database.
+Authenticate every MCP request with:
+
+```text
+Authorization: Bearer gab_mcp_...
+```
+
+For clients that accept JSON MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "github-agent-bridge": {
+      "url": "https://bridge.example.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_AGENT_BRIDGE_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
 
 ## Exposed capabilities
 

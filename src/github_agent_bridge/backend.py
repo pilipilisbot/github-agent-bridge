@@ -47,7 +47,7 @@ from .dashboard_data import (
     transcript_entry_from_session_event,
 )
 from .monitor import monitor
-from .mcp import create_token, list_tokens, revoke_token
+from .mcp import MCPServer, authenticate_token, create_token, list_tokens, revoke_token
 from .observability import configure_sentry, list_alerts, recent_process_samples
 from .queue import JobQueue
 from .systemd_status import allowed_unit_names, stream_journal_lines, systemd_status
@@ -166,19 +166,25 @@ def _redacted_headers() -> dict[str, str]:
 
 
 def _dashboard_public_url(request: Request) -> str:
+    url, _ = _dashboard_public_url_with_source(request)
+    return url
+
+
+def _dashboard_public_url_with_source(request: Request) -> tuple[str, str]:
     cfg: DashboardConfig = request.app.state.dashboard_config
     if cfg.public_url:
-        return cfg.public_url
+        return cfg.public_url, "configured"
 
     forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
     host = forwarded_host or request.headers.get("host", "").strip()
     if not host:
-        return str(request.base_url).rstrip("/")
+        return str(request.base_url).rstrip("/"), "request"
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     scheme = forwarded_proto or request.url.scheme
     forwarded_prefix = request.headers.get("x-forwarded-prefix", "").split(",", 1)[0].strip().rstrip("/")
-    return f"{scheme}://{host}{forwarded_prefix}"
+    source = "forwarded" if forwarded_host or forwarded_proto or forwarded_prefix else "request"
+    return f"{scheme}://{host}{forwarded_prefix}", source
 
 
 def _sse_headers() -> dict[str, str]:
@@ -197,6 +203,14 @@ def _sse_event(event: str, data: dict[str, Any], *, event_id: int | None = None)
 
 def _transcript_sse_key(entry: dict[str, Any]) -> str:
     return json.dumps(entry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _bearer_token(request: Request) -> str:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="mcp_token_required")
+    return token.strip()
 
 
 async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int | None = None, sleep_seconds: float = 2.0):
@@ -466,6 +480,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.get("/api/status")
     def api_status(request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         queue = JobQueue(config.db)
+        dashboard_url, dashboard_url_source = _dashboard_public_url_with_source(request)
         admin_actions = [
             "retry_job",
             "dismiss_job",
@@ -481,7 +496,8 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         return {
             "service": "github-agent-bridge-dashboard",
             "read_only": False,
-            "dashboard_url": _dashboard_public_url(request),
+            "dashboard_url": dashboard_url,
+            "dashboard_url_source": dashboard_url_source,
             "admin_actions": admin_actions,
             "metrics": inspect_db_read_only(config.db),
             "autoupdate": load_update_state(queue) if profile.get("is_admin") else {},
@@ -758,6 +774,23 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if not revoke_token(config.db, token_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mcp_token_not_found")
         return {"detail": "mcp_token_revoked"}
+
+    @app.post("/api/mcp")
+    @app.post("/api/mcp/")
+    async def api_mcp_http(request: Request) -> Response:
+        if authenticate_token(config.db, _bearer_token(request)) is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_mcp_token")
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mcp_request_must_be_object")
+
+        response = MCPServer(config.db).handle(payload)
+        if response is None:
+            return Response(status_code=status.HTTP_202_ACCEPTED, headers=_redacted_headers())
+        return JSONResponse(response, headers=_redacted_headers())
 
     @app.get("/api/events/stream")
     def api_events(_: str = Depends(current_user)) -> Response:
