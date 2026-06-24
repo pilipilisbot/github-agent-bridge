@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.48.0 (2026-06-24)
+
+### Bug Fixes
+
+- Clarify public MCP dashboard URLs
+  ([`17a51eb`](https://github.com/pilipilisbot/github-agent-bridge/commit/17a51eb1e30e89744f4ca3678172e02831fbbab8))
+
+- Remove local MCP fallback guidance
+  ([`590a448`](https://github.com/pilipilisbot/github-agent-bridge/commit/590a448924787c42de605ff67c97eda70e8ea7a8))
+
+### Features
+
+- Expose MCP over HTTP
+  ([`fc19100`](https://github.com/pilipilisbot/github-agent-bridge/commit/fc191008035cf9ecfebe96a480a75e08a3a38deb))
+
+
 ## v0.47.0 (2026-06-23)
 
 ### Bug Fixes
