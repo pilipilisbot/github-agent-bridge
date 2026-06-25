@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.48.1 (2026-06-25)
+
+### Bug Fixes
+
+- Classify intents from semantic main request
+  ([`c2da9f2`](https://github.com/pilipilisbot/github-agent-bridge/commit/c2da9f26db604d1f2c361eb02a86b39e14285111))
+
+
 ## v0.48.0 (2026-06-24)
 
 ### Bug Fixes
