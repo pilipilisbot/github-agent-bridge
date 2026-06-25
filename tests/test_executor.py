@@ -17,7 +17,6 @@ class FakeGitHub:
         self.eyes = 0
         self.acks = 0
         self.eye_comment_ids = []
-        self.completion_notifications = []
 
     def is_assigned_to_current_user(self, ctx):
         return self.assigned
@@ -45,20 +44,6 @@ class FakeGitHub:
     def react_ack_no_comment(self, ctx):
         self.acks += 1
         return True
-
-    def post_completion_notification(self, ctx, *, actors, job_id, work_key, status, summary, detail=None, followup_url=None):
-        self.completion_notifications.append(
-            {
-                "actors": actors,
-                "job_id": job_id,
-                "work_key": work_key,
-                "status": status,
-                "summary": summary,
-                "detail": detail,
-                "followup_url": followup_url,
-            }
-        )
-        return f"https://github.com/{ctx.repo}/issues/{ctx.issue_number}#issuecomment-completion"
 
 
 class RecordingDispatcher:
@@ -184,30 +169,31 @@ def test_executor_records_session_activity_events(tmp_path):
     assert stderr_event["detail"] == "token=[redacted] [redacted]"
 
 
-def test_dispatched_job_completion_notifies_trigger_actor(tmp_path):
+def test_dispatched_job_completion_pushes_trigger_actor(tmp_path, monkeypatch):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     job, state = enqueue_pr_comment_from(queue, "ecarreras", 1, "<gisce/erp/pull/27315/ecarreras@github.com>", 1)
     assert state == "enqueued"
     dispatcher = RecordingDispatcher()
     github = FakeGitHub(assigned=True)
+    notifications = []
+    monkeypatch.setattr("github_agent_bridge.executor.notify_job_completion", lambda *args, **kwargs: notifications.append((args, kwargs)) or {"sent": 1})
 
     pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
     assert pool.work_one("worker-test") is True
 
-    assert github.completion_notifications == [
-        {
-            "actors": ["ecarreras"],
-            "job_id": job.id,
-            "work_key": "gisce/erp#27315",
-            "status": "done",
-            "summary": "👀 reaction ok + agent dispatch queued",
-            "detail": "followup_url=https://github.com/gisce/erp/issues/27315#issuecomment-2; ok",
-            "followup_url": "https://github.com/gisce/erp/issues/27315#issuecomment-2",
-        }
-    ]
+    assert notifications[0][0] == (queue.path,)
+    assert notifications[0][1] == {
+        "actors": ["ecarreras"],
+        "job_id": job.id,
+        "work_key": "gisce/erp#27315",
+        "status": "done",
+        "summary": "👀 reaction ok + agent dispatch queued",
+        "detail": "followup_url=https://github.com/gisce/erp/issues/27315#issuecomment-2; ok",
+        "followup_url": "https://github.com/gisce/erp/issues/27315#issuecomment-2",
+    }
 
 
-def test_dispatched_job_completion_notifies_coalesced_trigger_actors(tmp_path):
+def test_dispatched_job_completion_pushes_coalesced_trigger_actors(tmp_path, monkeypatch):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     job, state = enqueue_pr_comment_from(queue, "ecarreras", 1, "<gisce/erp/pull/27315/ecarreras@github.com>", 1)
     assert state == "enqueued"
@@ -215,25 +201,29 @@ def test_dispatched_job_completion_notifies_coalesced_trigger_actors(tmp_path):
     assert state == "coalesced"
     dispatcher = RecordingDispatcher()
     github = FakeGitHub(assigned=True)
+    notifications = []
+    monkeypatch.setattr("github_agent_bridge.executor.notify_job_completion", lambda *args, **kwargs: notifications.append(kwargs) or {"sent": 1})
 
     pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
     assert pool.work_one("worker-test") is True
 
-    assert github.completion_notifications[0]["actors"] == ["ecarreras", "marc"]
-    assert github.completion_notifications[0]["job_id"] == job.id
+    assert notifications[0]["actors"] == ["ecarreras", "marc"]
+    assert notifications[0]["job_id"] == job.id
 
 
-def test_skipped_job_does_not_emit_completion_notification(tmp_path):
+def test_skipped_job_does_not_emit_completion_push(tmp_path, monkeypatch):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     enqueue_pr_comment_from(queue, "ecarreras", 1, "<gisce/erp/pull/27315/ecarreras@github.com>", 1)
     dispatcher = RecordingDispatcher()
     github = FakeGitHub(assigned=False, mentioned=False)
+    notifications = []
+    monkeypatch.setattr("github_agent_bridge.executor.notify_job_completion", lambda *args, **kwargs: notifications.append(kwargs) or {"sent": 1})
 
     pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
     assert pool.work_one("worker-test") is True
 
     assert dispatcher.jobs == []
-    assert github.completion_notifications == []
+    assert notifications == []
 
 
 def test_executor_records_selected_model_route_session_event(tmp_path):

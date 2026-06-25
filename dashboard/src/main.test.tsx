@@ -17,6 +17,7 @@ import {
   StatusBadge,
   SystemdUnits,
   UserMenu,
+  WebPushControl,
   buildJobQuery,
   buildKnowledgeQuery,
   changelogMarkdown,
@@ -31,6 +32,7 @@ import {
   runtimeBucketLabel,
   selectedJobIdFromPath,
   shouldRefreshJobForSessionEvent,
+  urlBase64ToUint8Array,
 } from "./main";
 
 describe("dashboard routing and API query helpers", () => {
@@ -133,6 +135,16 @@ describe("dashboard routing and API query helpers", () => {
     expect(formatRuntimeUsageSeconds(1800)).toBe("30m");
     expect(formatRuntimeUsageSeconds(5400)).toBe("1h 30m");
     expect(formatRuntimeUsageSeconds(7200)).toBe("2h");
+  });
+
+  it("decodes VAPID public keys for push manager subscriptions", () => {
+    expect(Array.from(urlBase64ToUint8Array("AQIDBA"))).toEqual([1, 2, 3, 4]);
+  });
+
+  it("shows a compact disabled notification control before push is configured", () => {
+    render(<WebPushControl config={{ configured: false, public_key: "", status: { enabled: false, subscriptions: [] } }} loading={false} onEnable={vi.fn()} onDisable={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Notifications unavailable" })).toBeDisabled();
   });
 });
 

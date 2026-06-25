@@ -12,7 +12,6 @@ from enum import StrEnum
 from typing import Callable
 
 from . import feedback
-from .actors import normalize_github_login
 from .models import GitHubContext, Job
 from .policy import DEFAULT_REPO_ROLE, Policy, Route
 from .session_correlation import (
@@ -435,86 +434,6 @@ class GitHubClient:
 
     def react_ack_no_comment(self, ctx: GitHubContext) -> bool:
         return self.react(ctx, "+1")
-
-    def post_completion_notification(
-        self,
-        ctx: GitHubContext,
-        *,
-        actors: list[str],
-        job_id: int,
-        work_key: str,
-        status: str,
-        summary: str,
-        detail: str | None = None,
-        followup_url: str | None = None,
-    ) -> str | None:
-        if self.mode != RunMode.LIVE:
-            return None
-        if not ctx.repo or not ctx.issue_number:
-            return None
-        recipients = self._completion_recipients(actors)
-        if not recipients:
-            return None
-        body = self._completion_notification_body(
-            recipients,
-            job_id=job_id,
-            work_key=work_key,
-            status=status,
-            summary=summary,
-            detail=detail,
-            followup_url=followup_url,
-        )
-        result = self._run([
-            "api",
-            "-X",
-            "POST",
-            f"repos/{ctx.repo}/issues/{ctx.issue_number}/comments",
-            "-f",
-            f"body={body}",
-            "--jq",
-            ".html_url",
-        ])
-        if result.returncode != 0:
-            return None
-        return result.stdout.strip() or None
-
-    def _completion_recipients(self, actors: list[str]) -> list[str]:
-        current = (self.current_login() or "").lower()
-        recipients: list[str] = []
-        seen: set[str] = set()
-        for actor in actors:
-            login = normalize_github_login(actor)
-            if not login or login.endswith("[bot]"):
-                continue
-            key = login.lower()
-            if key == current or key in seen:
-                continue
-            seen.add(key)
-            recipients.append(login)
-        return recipients
-
-    def _completion_notification_body(
-        self,
-        recipients: list[str],
-        *,
-        job_id: int,
-        work_key: str,
-        status: str,
-        summary: str,
-        detail: str | None = None,
-        followup_url: str | None = None,
-    ) -> str:
-        mentions = " ".join(f"@{login}" for login in recipients)
-        lines = [
-            f"{mentions} bridge job #{job_id} for `{work_key}` finished with status `{status}`.",
-            "",
-            summary.strip()[:500],
-        ]
-        if followup_url:
-            lines.extend(["", f"Follow-up: {followup_url}"])
-        elif detail and status == "blocked":
-            lines.extend(["", f"Detail: {detail.strip()[:500]}"])
-        return "\n".join(lines)
 
 
 class OpenClawDispatcher:

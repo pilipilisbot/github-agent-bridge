@@ -63,6 +63,9 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_TEAMS=
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_USERS=your-github-login
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS=
 GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
 EOF
 chmod 600 ~/.config/github-agent-bridge/env
 ```
@@ -90,6 +93,12 @@ Use at least one authorization allowlist:
 - `GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`: optional external dashboard
   origin, for example `https://bridge.example.com`, used in shareable dashboard
   links when the service runs behind nginx or another reverse proxy.
+- `GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY`: browser Push API VAPID public
+  key served to signed-in dashboard users.
+- `GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY`: matching VAPID private key
+  used by the executor to send job completion pushes.
+- `GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT`: VAPID `sub` claim, usually a
+  `mailto:` contact for the operator.
 
 If all allowlists are empty, any authenticated GitHub user is accepted. That is
 only appropriate for isolated local development.
@@ -101,6 +110,15 @@ listed in an `ALLOWED_*` variable.
 
 Per-repository dashboard scopes are part of the issue #4 architecture but are
 not implemented in the current dashboard backend.
+
+## Browser Push Notifications
+
+Completion notifications use the browser Push API, not GitHub mention comments.
+Run the dashboard behind HTTPS, set `GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`
+to that external origin, and configure the VAPID key pair above. Each GitHub user
+must sign in to the dashboard and enable the bell control once; the subscription
+is stored against their GitHub login and the executor targets that login when a
+job they triggered finishes as `done` or `blocked`.
 
 ## Start the Service
 

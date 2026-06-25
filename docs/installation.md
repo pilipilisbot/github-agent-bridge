@@ -255,6 +255,10 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_USERS=your-github-login
 GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_TEAMS=
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_USERS=your-github-login
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS=
+GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=https://bridge.example.com
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=replace-with-vapid-private-key
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
 EOF
 ```
 
@@ -263,6 +267,10 @@ Create the GitHub OAuth App with callback URL
 the public HTTPS origin when using a reverse proxy. See
 [`dashboard-github-oauth.md`](dashboard-github-oauth.md) for the full GitHub
 setup and security checklist.
+
+Browser push notifications require the public HTTPS origin in
+`GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`, the VAPID key pair above, and a
+dashboard sign-in from each GitHub user who wants job completion notifications.
 
 ```bash
 systemctl --user status github-agent-bridge-dashboard.service

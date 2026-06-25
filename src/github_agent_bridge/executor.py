@@ -9,6 +9,7 @@ from .dispatch import GitHubClient, OpenClawDispatcher
 from .policy import Policy
 from .queue import JobQueue
 from .session_events import redact_event_detail
+from .web_push import notify_job_completion
 
 
 NO_FOLLOWUP_OK_MARKERS = (
@@ -140,8 +141,8 @@ class ExecutorPool:
         if not notify_completion:
             return
         actors = [actor for actor in [job.trigger_actor, *self.queue.coalesced_trigger_actors(job.id)] if actor]
-        self.github.post_completion_notification(
-            job.context,
+        notify_job_completion(
+            self.queue.path,
             actors=actors,
             job_id=job.id,
             work_key=job.work_key,
