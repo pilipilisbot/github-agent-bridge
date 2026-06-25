@@ -39,5 +39,8 @@ def test_notify_job_completion_sends_to_matching_human_subscriptions(tmp_path):
 
     assert result == {"recipients": ["ecarreras", "marc"], "attempted": 2, "sent": 2, "failed": 0}
     assert {item[0]["endpoint"] for item in sent} == {"https://push.example/sub/ecarreras", "https://push.example/sub/marc"}
-    assert sent[0][1]["url"] == "https://github.com/gisce/erp/pull/27315#issuecomment-2"
+    assert sent[0][1]["url"] == "https://bridge.example.com/jobs/42"
     assert sent[0][1]["job_url"] == "https://bridge.example.com/jobs/42"
+    assert sent[0][1]["github_url"] == "https://github.com/gisce/erp/pull/27315#issuecomment-2"
+    assert sent[0][1]["followup_url"] == "https://github.com/gisce/erp/pull/27315#issuecomment-2"
+    assert sent[0][1]["timestamp"].endswith("Z")

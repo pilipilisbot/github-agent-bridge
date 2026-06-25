@@ -168,13 +168,16 @@ def _job_completion_payload(
         "title": f"Bridge job {status}",
         "body": f"{work_key} finished with status {status}",
         "tag": f"gab-job-{job_id}",
-        "url": followup_url or dashboard_job_url,
+        "url": dashboard_job_url,
         "job_url": dashboard_job_url,
+        "github_url": followup_url,
+        "followup_url": followup_url,
         "job_id": job_id,
         "work_key": work_key,
         "status": status,
         "summary": summary,
         "detail": detail,
+        "timestamp": utc_now(),
     }
 
 
