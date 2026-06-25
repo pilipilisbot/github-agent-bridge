@@ -41,6 +41,63 @@ def test_visible_followup_finds_review_comment_after_review_trigger():
     assert github.visible_followup_after_trigger(ctx) == followup["html_url"]
 
 
+def test_post_completion_notification_mentions_human_actors_once():
+    ctx = GitHubContext(
+        urls=["https://github.com/gisce/erp/pull/27805"],
+        repo="gisce/erp",
+        issue_number=27805,
+    )
+    github = RecordingGitHubClient(
+        {
+            ("api", "user", "--jq", ".login"): "pilipilisbot\n",
+            (
+                "api",
+                "-X",
+                "POST",
+                "repos/gisce/erp/issues/27805/comments",
+                "-f",
+                "body=@ecarreras @marc bridge job #42 for `gisce/erp#27805` finished with status `done`.\n\nagent dispatch queued\n\nFollow-up: https://github.com/gisce/erp/pull/27805#issuecomment-99",
+                "--jq",
+                ".html_url",
+            ): "https://github.com/gisce/erp/pull/27805#issuecomment-100\n",
+        }
+    )
+
+    url = github.post_completion_notification(
+        ctx,
+        actors=["ecarreras", "marc", "ecarreras", "copilot[bot]", "pilipilisbot"],
+        job_id=42,
+        work_key="gisce/erp#27805",
+        status="done",
+        summary="agent dispatch queued",
+        followup_url="https://github.com/gisce/erp/pull/27805#issuecomment-99",
+    )
+
+    assert url == "https://github.com/gisce/erp/pull/27805#issuecomment-100"
+
+
+def test_post_completion_notification_skips_without_recipients():
+    ctx = GitHubContext(
+        urls=["https://github.com/gisce/erp/pull/27805"],
+        repo="gisce/erp",
+        issue_number=27805,
+    )
+    github = RecordingGitHubClient({("api", "user", "--jq", ".login"): "pilipilisbot\n"})
+
+    assert (
+        github.post_completion_notification(
+            ctx,
+            actors=["pilipilisbot", "github", "copilot[bot]"],
+            job_id=42,
+            work_key="gisce/erp#27805",
+            status="done",
+            summary="agent dispatch queued",
+        )
+        is None
+    )
+    assert github.calls == [["api", "user", "--jq", ".login"]]
+
+
 def test_visible_followup_finds_review_after_issue_comment_trigger():
     ctx = GitHubContext(
         urls=["https://github.com/pilipilisbot/github-agent-bridge/pull/53#issuecomment-4663425063"],

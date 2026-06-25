@@ -17,6 +17,7 @@ class FakeGitHub:
         self.eyes = 0
         self.acks = 0
         self.eye_comment_ids = []
+        self.completion_notifications = []
 
     def is_assigned_to_current_user(self, ctx):
         return self.assigned
@@ -44,6 +45,20 @@ class FakeGitHub:
     def react_ack_no_comment(self, ctx):
         self.acks += 1
         return True
+
+    def post_completion_notification(self, ctx, *, actors, job_id, work_key, status, summary, detail=None, followup_url=None):
+        self.completion_notifications.append(
+            {
+                "actors": actors,
+                "job_id": job_id,
+                "work_key": work_key,
+                "status": status,
+                "summary": summary,
+                "detail": detail,
+                "followup_url": followup_url,
+            }
+        )
+        return f"https://github.com/{ctx.repo}/issues/{ctx.issue_number}#issuecomment-completion"
 
 
 class RecordingDispatcher:
@@ -93,6 +108,19 @@ def enqueue_pr_comment(queue: JobQueue):
     assert job.action == "reply_comment"
     assert job.work_intent == "review_only"
     return job
+
+
+def enqueue_pr_comment_from(queue: JobQueue, actor: str, uid: int, message_id: str, comment_id: int):
+    notification = Notification(
+        uid=uid,
+        message_id=message_id,
+        subject="Re: [gisce/erp] Permitir caller en los dominios (PR #27315)",
+        from_addr=f"{actor} <notifications@github.com>",
+        body=f"@pilipilisbot fes-ho https://github.com/gisce/erp/pull/27315#issuecomment-{comment_id}",
+    )
+    job, state = queue.enqueue(notification, Policy(trusted_orgs={"gisce"}))
+    assert job is not None
+    return job, state
 
 
 def enqueue_workflow_run_failed(queue: JobQueue):
@@ -154,6 +182,58 @@ def test_executor_records_session_activity_events(tmp_path):
     assert route_event["detail"] == "OpenClaw default model route"
     stderr_event = job_session_events(db, dispatcher.jobs[0].id)[4]
     assert stderr_event["detail"] == "token=[redacted] [redacted]"
+
+
+def test_dispatched_job_completion_notifies_trigger_actor(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job, state = enqueue_pr_comment_from(queue, "ecarreras", 1, "<gisce/erp/pull/27315/ecarreras@github.com>", 1)
+    assert state == "enqueued"
+    dispatcher = RecordingDispatcher()
+    github = FakeGitHub(assigned=True)
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
+    assert github.completion_notifications == [
+        {
+            "actors": ["ecarreras"],
+            "job_id": job.id,
+            "work_key": "gisce/erp#27315",
+            "status": "done",
+            "summary": "👀 reaction ok + agent dispatch queued",
+            "detail": "followup_url=https://github.com/gisce/erp/issues/27315#issuecomment-2; ok",
+            "followup_url": "https://github.com/gisce/erp/issues/27315#issuecomment-2",
+        }
+    ]
+
+
+def test_dispatched_job_completion_notifies_coalesced_trigger_actors(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job, state = enqueue_pr_comment_from(queue, "ecarreras", 1, "<gisce/erp/pull/27315/ecarreras@github.com>", 1)
+    assert state == "enqueued"
+    _, state = enqueue_pr_comment_from(queue, "marc", 2, "<gisce/erp/pull/27315/marc@github.com>", 2)
+    assert state == "coalesced"
+    dispatcher = RecordingDispatcher()
+    github = FakeGitHub(assigned=True)
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
+    assert github.completion_notifications[0]["actors"] == ["ecarreras", "marc"]
+    assert github.completion_notifications[0]["job_id"] == job.id
+
+
+def test_skipped_job_does_not_emit_completion_notification(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    enqueue_pr_comment_from(queue, "ecarreras", 1, "<gisce/erp/pull/27315/ecarreras@github.com>", 1)
+    dispatcher = RecordingDispatcher()
+    github = FakeGitHub(assigned=False, mentioned=False)
+
+    pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=github, config=ExecutorConfig(run_once=True))
+    assert pool.work_one("worker-test") is True
+
+    assert dispatcher.jobs == []
+    assert github.completion_notifications == []
 
 
 def test_executor_records_selected_model_route_session_event(tmp_path):
