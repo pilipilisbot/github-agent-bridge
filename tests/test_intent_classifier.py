@@ -6,6 +6,7 @@ from github_agent_bridge.intent_classifier import (
     build_intent_prompt,
     classify_notification_with_llm,
     intent_session_id,
+    normalize_result,
 )
 from github_agent_bridge.models import Notification
 from github_agent_bridge.parser import extract_github_context
@@ -61,6 +62,43 @@ def test_packaged_intent_prompt_builds_without_formatting_json_example():
 
     assert '"action": "reply_comment"' in prompt
     assert '"message_id": "<1@github.com>"' in prompt
+
+
+def test_packaged_intent_prompt_requires_semantic_decomposition():
+    notif = notification(
+        "<1@github.com>",
+        "@giscebot fes una pull request per cada notificació (email). "
+        "Així serà més fàcil revisar-ho i integrar-ho",
+    )
+
+    prompt = build_intent_prompt(
+        notif,
+        extract_github_context(notif.body),
+        ParserResult("reply_comment", "review_only"),
+    )
+
+    assert '"main_request"' in prompt
+    assert '"subordinate_reason"' in prompt
+    assert "Classify from the main request" in prompt
+    assert "parser_result" in prompt
+
+
+def test_normalize_result_preserves_semantic_decomposition_metadata():
+    result = normalize_result(
+        {
+            "action": "reply_comment",
+            "work_intent": "work_allowed",
+            "main_request": "Fer una pull request separada per cada notificació.",
+            "subordinate_reason": "Així serà més fàcil revisar-ho i integrar-ho.",
+            "confidence": 0.98,
+            "reason": "The main request asks for repository work.",
+        },
+        0.75,
+    )
+
+    assert result.applied is True
+    assert result.to_metadata()["main_request"] == "Fer una pull request separada per cada notificació."
+    assert result.to_metadata()["subordinate_reason"] == "Així serà més fàcil revisar-ho i integrar-ho."
 
 
 def test_classify_notification_with_llm_uses_isolated_session_id(monkeypatch):

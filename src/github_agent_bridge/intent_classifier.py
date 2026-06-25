@@ -37,15 +37,22 @@ class IntentClassification:
     confidence: float
     reason: str
     applied: bool
+    main_request: str = ""
+    subordinate_reason: str = ""
 
     def to_metadata(self) -> dict[str, object]:
-        return {
+        metadata: dict[str, object] = {
             "action": self.action,
             "work_intent": self.work_intent,
             "confidence": self.confidence,
             "reason": self.reason,
             "applied": self.applied,
         }
+        if self.main_request:
+            metadata["main_request"] = self.main_request
+        if self.subordinate_reason:
+            metadata["subordinate_reason"] = self.subordinate_reason
+        return metadata
 
 
 def should_classify_with_llm(
@@ -97,6 +104,8 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
     work_intent = str(result.get("work_intent") or result.get("intent") or "").strip().lower()
     confidence = float(result.get("confidence") or 0)
     confidence = min(1.0, max(0.0, confidence))
+    main_request = compact(str(result.get("main_request") or ""), 500)
+    subordinate_reason = compact(str(result.get("subordinate_reason") or ""), 500)
     reason = compact(str(result.get("reason") or ""), 500)
     applied = action in ALLOWED_ACTIONS and work_intent in ALLOWED_WORK_INTENTS and confidence >= min_confidence
     return IntentClassification(
@@ -105,6 +114,8 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
         confidence=confidence,
         reason=reason,
         applied=applied,
+        main_request=main_request,
+        subordinate_reason=subordinate_reason,
     )
 
 
