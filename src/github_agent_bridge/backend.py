@@ -51,6 +51,7 @@ from .mcp import MCPServer, authenticate_token, create_token, list_tokens, revok
 from .observability import configure_sentry, list_alerts, recent_process_samples
 from .queue import JobQueue
 from .systemd_status import allowed_unit_names, stream_journal_lines, systemd_status
+from .web_push import delete_subscription, save_subscription, subscription_status
 
 
 DEFAULT_HOST = os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_HOST", "127.0.0.1")
@@ -81,6 +82,7 @@ class DashboardConfig:
         require_auth: bool = True,
         static_dir: str | Path | None = None,
         public_url: str | None = None,
+        web_push_public_key: str | None = None,
     ) -> None:
         self.db = Path(db).expanduser()
         self.secret_key = secret_key or os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_SECRET_KEY", "")
@@ -94,6 +96,7 @@ class DashboardConfig:
         self.require_auth = require_auth
         self.static_dir = Path(static_dir or os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_STATIC_DIR", Path(__file__).with_name("dashboard_static"))).expanduser()
         self.public_url = (public_url if public_url is not None else os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL", "")).rstrip("/")
+        self.web_push_public_key = web_push_public_key if web_push_public_key is not None else os.getenv("GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY", "")
 
     @property
     def oauth_ready(self) -> bool:
@@ -448,6 +451,16 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             return redirect
         return dashboard_index()
 
+    @app.get("/service-worker.js")
+    async def service_worker(request: Request) -> Response:
+        redirect = await require_dashboard_profile_or_login(request)
+        if redirect is not None:
+            return redirect
+        worker = config.static_dir / "service-worker.js"
+        if not worker.exists():
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="dashboard_service_worker_not_built")
+        return FileResponse(worker, headers={**_redacted_headers(), "Service-Worker-Allowed": "/"})
+
     @app.get("/jobs/{job_path:path}")
     async def dashboard_job(job_path: str, request: Request) -> Response:
         redirect = await require_dashboard_profile_or_login(request)
@@ -557,6 +570,42 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     @app.get("/api/me")
     def api_me(profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         return {"user": profile}
+
+    @app.get("/api/web-push/config")
+    def api_web_push_config(profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        return {
+            "public_key": config.web_push_public_key,
+            "configured": bool(config.web_push_public_key),
+            "status": subscription_status(config.db, str(profile["login"])),
+        }
+
+    @app.post("/api/web-push/subscriptions")
+    async def api_web_push_subscribe(request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        if not config.web_push_public_key:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="web_push_not_configured")
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="subscription_required")
+        try:
+            subscription = save_subscription(config.db, str(profile["login"]), payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return {"subscription": subscription, "status": subscription_status(config.db, str(profile["login"]))}
+
+    @app.delete("/api/web-push/subscriptions")
+    async def api_web_push_unsubscribe(request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_json") from exc
+        endpoint = str(payload.get("endpoint") or "") if isinstance(payload, dict) else ""
+        if not endpoint:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="subscription_endpoint_required")
+        removed = delete_subscription(config.db, str(profile["login"]), endpoint)
+        return {"removed": removed, "status": subscription_status(config.db, str(profile["login"]))}
 
     @app.get("/api/jobs")
     def api_jobs(

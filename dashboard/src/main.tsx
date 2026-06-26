@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Bell, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
@@ -384,6 +384,43 @@ type McpTokenCreateResponse = {
   detail: string;
 };
 
+type WebPushSubscriptionStatus = {
+  enabled: boolean;
+  subscriptions: Array<{
+    id: number;
+    endpoint: string;
+    updated_at: string;
+    last_success_at: string | null;
+    last_error: string | null;
+  }>;
+};
+
+type WebPushConfig = {
+  public_key: string;
+  configured: boolean;
+  status: WebPushSubscriptionStatus;
+};
+
+type WebPushPayload = {
+  title?: string;
+  body?: string;
+  url?: string;
+  job_url?: string;
+  github_url?: string | null;
+  followup_url?: string | null;
+  job_id?: number;
+  work_key?: string;
+  status?: string;
+  summary?: string;
+  detail?: string | null;
+  timestamp?: string;
+};
+
+type InAppPushNotification = WebPushPayload & {
+  id: number;
+  receivedAt: number;
+};
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -632,6 +669,25 @@ function safeExternalUrl(value: string) {
   }
 }
 
+function supportsWebPush() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function isWebPushMessage(value: unknown): value is { type: "github-agent-bridge:push"; payload: WebPushPayload } {
+  return Boolean(value && typeof value === "object" && "type" in value && (value as { type?: unknown }).type === "github-agent-bridge:push");
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    output[index] = raw.charCodeAt(index);
+  }
+  return output;
+}
+
 function jobPath(jobId: number) {
   return `/jobs/${jobId}`;
 }
@@ -702,6 +758,7 @@ function App() {
   const [autoupdateAction, setAutoupdateAction] = React.useState<"refresh" | "apply" | "complete" | null>(null);
   const [autoupdateError, setAutoupdateError] = React.useState("");
   const [pathname, setPathname] = React.useState(() => window.location.pathname);
+  const [inAppPush, setInAppPush] = React.useState<InAppPushNotification | null>(null);
   const jobRouteId = selectedJobIdFromPath(pathname);
   const isJobDetailRoute = jobRouteId !== null;
   const isKnowledgeRoute = isKnowledgePath(pathname);
@@ -712,6 +769,7 @@ function App() {
   const metrics = useQuery({ queryKey: ["metrics", dashboardTimeZone], queryFn: () => api<{ metrics: MetricsSummary }>(metricsSummaryPath()), enabled: isDashboardRoute || isSystemRoute });
   const dashboardStatus = useQuery({ queryKey: ["dashboard-status"], queryFn: () => api<DashboardStatus>("/api/status") });
   const me = useQuery({ queryKey: ["me"], queryFn: () => api<{ user: UserProfile }>("/api/me"), refetchInterval: false });
+  const webPush = useQuery({ queryKey: ["web-push-config"], queryFn: () => api<WebPushConfig>("/api/web-push/config"), enabled: Boolean(me.data?.user) });
   const about = useQuery({ queryKey: ["about"], queryFn: () => api<About>("/api/about") });
   const actorOptions = useQuery({ queryKey: ["job-actors"], queryFn: () => api<{ actors: JobActor[] }>("/api/jobs/actors"), enabled: isDashboardRoute });
   const jobs = useQuery({
@@ -814,6 +872,44 @@ function App() {
       setAutoupdateAction(null);
     }
   }, [queryClient]);
+  const enableWebPush = React.useCallback(async () => {
+    const publicKey = webPush.data?.public_key;
+    if (!publicKey) throw new Error("web_push_not_configured");
+    if (!supportsWebPush()) throw new Error("web_push_not_supported");
+    const permission = await window.Notification.requestPermission();
+    if (permission !== "granted") throw new Error("notification_permission_denied");
+    const registration = await navigator.serviceWorker.register("/service-worker.js");
+    const existing = await registration.pushManager.getSubscription();
+    const subscription = existing ?? await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    await api("/api/web-push/subscriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    queryClient.invalidateQueries({ queryKey: ["web-push-config"] });
+  }, [queryClient, webPush.data?.public_key]);
+  const disableWebPush = React.useCallback(async () => {
+    if (!supportsWebPush()) return;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    const endpoint = subscription.endpoint;
+    await subscription.unsubscribe();
+    await api("/api/web-push/subscriptions", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["web-push-config"] });
+  }, [queryClient]);
+
+  React.useEffect(() => {
+    if (!webPush.data?.status.enabled || !supportsWebPush()) return;
+    void navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
+  }, [webPush.data?.status.enabled]);
 
   React.useEffect(() => {
     if (selectedJobId === null) return;
@@ -852,6 +948,28 @@ function App() {
     return () => window.removeEventListener("popstate", syncFromPath);
   }, []);
 
+  React.useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    const onMessage = (event: MessageEvent) => {
+      if (!isWebPushMessage(event.data)) return;
+      const notification = { ...event.data.payload, id: Date.now(), receivedAt: Date.now() };
+      setInAppPush(notification);
+      if (notification.job_id) {
+        queryClient.invalidateQueries({ queryKey: ["jobs"] });
+        queryClient.invalidateQueries({ queryKey: ["job", notification.job_id] });
+        queryClient.invalidateQueries({ queryKey: ["metrics"] });
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [queryClient]);
+
+  React.useEffect(() => {
+    if (!inAppPush) return undefined;
+    const timer = window.setTimeout(() => setInAppPush(null), 12000);
+    return () => window.clearTimeout(timer);
+  }, [inAppPush]);
+
   const viewJob = React.useCallback((jobId: number) => {
     window.history.pushState({}, "", jobPath(jobId));
     setPathname(window.location.pathname);
@@ -889,12 +1007,16 @@ function App() {
             <h1 className="truncate text-xl font-semibold">GitHub Agent Bridge</h1>
             <ProductMeta about={about.data} />
           </div>
-          <UserMenu user={me.data?.user} loading={me.isLoading} />
+          <div className="flex shrink-0 items-center gap-2">
+            <WebPushControl config={webPush.data} loading={webPush.isLoading} onEnable={enableWebPush} onDisable={disableWebPush} />
+            <UserMenu user={me.data?.user} loading={me.isLoading} />
+          </div>
         </div>
       </header>
 
       <main className="mx-auto grid w-full max-w-[1440px] gap-4 px-3 py-4 sm:px-4 md:px-6 md:py-5">
         <SectionNav isDashboardRoute={isDashboardRoute} isSystemRoute={isSystemRoute} isKnowledgeRoute={isKnowledgeRoute} isMcpRoute={isMcpRoute} knowledgeBadgeCount={dashboardStatus.data?.metrics?.knowledge?.proposed ?? 0} onNavigate={navigateDashboard} />
+        <WebPushToast notification={inAppPush} onDismiss={() => setInAppPush(null)} onNavigate={navigateDashboard} />
         {jobRouteId !== null ? (
           <JobDetailPage
             jobId={jobRouteId}
@@ -2146,6 +2268,95 @@ function UserMenu({ user, loading }: { user: UserProfile | undefined; loading: b
   );
 }
 
+function WebPushControl({
+  config,
+  loading,
+  onEnable,
+  onDisable,
+}: {
+  config: WebPushConfig | undefined;
+  loading: boolean;
+  onEnable: () => Promise<void>;
+  onDisable: () => Promise<void>;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const enabled = Boolean(config?.status.enabled);
+  const supported = typeof navigator !== "undefined" && typeof window !== "undefined" && supportsWebPush();
+  const disabled = loading || busy || !config?.configured || !supported;
+  const title = !supported ? "Notifications unavailable" : !config?.configured ? "Notifications not configured" : enabled ? "Disable notifications" : "Enable notifications";
+
+  return (
+    <div className="relative">
+      <button
+        className={cn(
+          "inline-flex h-9 w-9 items-center justify-center rounded-md border text-sm font-semibold",
+          enabled ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-700 bg-slate-900 text-slate-200",
+          disabled && "cursor-not-allowed opacity-60",
+        )}
+        type="button"
+        aria-label={title}
+        title={error || title}
+        disabled={disabled}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            if (enabled) await onDisable();
+            else await onEnable();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Bell className={cn("h-4 w-4", busy && "animate-live-pulse")} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function WebPushToast({ notification, onDismiss, onNavigate }: { notification: InAppPushNotification | null; onDismiss: () => void; onNavigate: (path: string) => void }) {
+  if (!notification) return null;
+  const title = notification.title || "GitHub Agent Bridge";
+  const body = notification.body || notification.summary || "Bridge job finished";
+  const url = notification.url || notification.job_url || (notification.job_id ? jobPath(notification.job_id) : "/");
+  const isInternal = url.startsWith("/");
+
+  return (
+    <aside className="fixed right-3 top-20 z-50 w-[min(calc(100vw-1.5rem),28rem)] rounded-md border border-emerald-300 bg-white shadow-xl shadow-slate-950/15" aria-live="assertive" aria-label="Bridge notification">
+      <div className="flex items-start gap-3 p-3">
+        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+          <Bell className="h-4 w-4" aria-hidden />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="min-w-0 break-words text-sm font-semibold text-foreground">{title}</h2>
+            <button className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-slate-100 hover:text-foreground" type="button" aria-label="Dismiss notification" onClick={onDismiss}>
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+          <p className="mt-1 min-w-0 break-words text-sm text-muted">{body}</p>
+          {notification.detail ? <p className="mt-1 line-clamp-2 min-w-0 break-words text-xs text-muted">{notification.detail}</p> : null}
+          <button
+            className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-semibold text-foreground hover:bg-slate-50"
+            type="button"
+            onClick={() => {
+              onDismiss();
+              if (isInternal) onNavigate(url);
+              else window.open(safeExternalUrl(url), "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            Open
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function JobsHeader({ count, limit, loading, onRefresh }: { count: number; limit: number; loading: boolean; onRefresh: () => void }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border bg-white px-3 py-3 shadow-sm md:px-4">
@@ -3365,6 +3576,7 @@ export {
   StatusBadge,
   SystemdUnits,
   UserMenu,
+  WebPushControl,
   KnowledgePage,
   KnowledgeProposals,
   KnowledgeRules,
@@ -3384,6 +3596,7 @@ export {
   runtimeBucketLabel,
   selectedJobIdFromPath,
   shouldRefreshJobForSessionEvent,
+  urlBase64ToUint8Array,
 };
 
 const root = document.getElementById("root");

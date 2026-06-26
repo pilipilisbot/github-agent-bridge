@@ -271,6 +271,14 @@ class JobQueue:
             ).fetchall()
         return [GitHubContext.from_json(row["context_json"]) for row in rows]
 
+    def coalesced_trigger_actors(self, job_id: int) -> list[str]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT trigger_actor FROM coalesced_notifications WHERE job_id=? ORDER BY id",
+                (job_id,),
+            ).fetchall()
+        return [row["trigger_actor"] for row in rows if row["trigger_actor"]]
+
     def stats(self) -> dict[str, int]:
         with self.connect() as con:
             return {r["status"]: r["count"] for r in con.execute("SELECT status, count(*) count FROM jobs GROUP BY status")}

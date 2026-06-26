@@ -276,6 +276,10 @@ them in the viewer's local timezone from `Intl.DateTimeFormat`; hovering a
 rendered timestamp shows the UTC value.
 Production serves the static bundle from
 `src/github_agent_bridge/dashboard_static`.
+When VAPID keys are configured and the dashboard is exposed over HTTPS, signed-in
+users can enable the header bell control. The executor sends final `done` and
+`blocked` job notifications through those browser push subscriptions for the
+triggering GitHub actor and coalesced human actors.
 
 The API uses GitHub OAuth sessions by default. Configure these values in
 `~/.config/github-agent-bridge/env`:
@@ -289,6 +293,13 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_ORGS=example-org
 GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_TEAMS=example-org/platform
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_USERS=alice
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS=example-org/bridge-admins
+GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=https://bridge.example.com
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=replace-with-vapid-private-key
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
+GITHUB_AGENT_BRIDGE_GITHUB_APP_ID=your-github-app-id
+GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=
 ```
 
 See [`dashboard-github-oauth.md`](dashboard-github-oauth.md) for the GitHub

@@ -2,6 +2,31 @@
 
 <!-- version list -->
 
+## v0.49.0 (2026-06-26)
+
+### Chores
+
+- Clarify web push notification icon
+  ([`d3c4db1`](https://github.com/pilipilisbot/github-agent-bridge/commit/d3c4db1685dfb1b2666b018ae9d743e070aea9f9))
+
+### Features
+
+- Allow configured web push notification icon
+  ([`907fc8c`](https://github.com/pilipilisbot/github-agent-bridge/commit/907fc8c9d04d04e924e401aae5fb596f407bfd95))
+
+- Derive web push icon from GitHub App
+  ([`0acca0a`](https://github.com/pilipilisbot/github-agent-bridge/commit/0acca0aeeb2f9ad56b828508436f555614274624))
+
+- Enrich web push notifications
+  ([`4d6a76c`](https://github.com/pilipilisbot/github-agent-bridge/commit/4d6a76cde5fa23930833c6926483166dbf776f7a))
+
+- Notify users when bridge jobs complete
+  ([`1a4e6af`](https://github.com/pilipilisbot/github-agent-bridge/commit/1a4e6aff4d7750454e7ed7621b6f1859e6a081ae))
+
+- Send bridge completion web pushes
+  ([`b999a49`](https://github.com/pilipilisbot/github-agent-bridge/commit/b999a49bb26020fe650573bd16fda44230d87fc1))
+
+
 ## v0.48.1 (2026-06-25)
 
 ### Bug Fixes

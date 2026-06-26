@@ -122,6 +122,38 @@ def test_dashboard_status_reports_forwarded_public_url(tmp_path):
     assert response.json()["dashboard_url_source"] == "forwarded"
 
 
+def test_dashboard_web_push_config_and_subscription_api(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    app = create_app(DashboardConfig(db=db, require_auth=False, web_push_public_key="public-vapid"))
+    client = TestClient(app)
+    payload = {"endpoint": "https://push.example/sub/1", "keys": {"p256dh": "public-key", "auth": "auth-secret"}}
+
+    config = client.get("/api/web-push/config")
+    created = client.post("/api/web-push/subscriptions", json=payload)
+    removed = client.request("DELETE", "/api/web-push/subscriptions", json={"endpoint": payload["endpoint"]})
+
+    assert config.status_code == 200
+    assert config.json()["configured"] is True
+    assert config.json()["status"]["enabled"] is False
+    assert created.status_code == 200
+    assert created.json()["status"]["enabled"] is True
+    assert created.json()["subscription"]["user_login"] == "test"
+    assert removed.status_code == 200
+    assert removed.json()["removed"] is True
+    assert removed.json()["status"]["enabled"] is False
+
+
+def test_dashboard_web_push_requires_public_key(tmp_path):
+    app = create_app(DashboardConfig(db=tmp_path / "bridge.sqlite3", require_auth=False))
+    client = TestClient(app)
+
+    response = client.post("/api/web-push/subscriptions", json={"endpoint": "https://push.example/sub/1", "keys": {"p256dh": "x", "auth": "y"}})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "web_push_not_configured"
+
+
 def test_dashboard_autoupdate_state_requires_admin_profile(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)
