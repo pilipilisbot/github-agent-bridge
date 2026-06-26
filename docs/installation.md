@@ -259,7 +259,9 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=https://bridge.example.com
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=replace-with-vapid-private-key
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
-GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=https://avatars.githubusercontent.com/in/your-github-app-id?s=192&v=4
+GITHUB_AGENT_BRIDGE_GITHUB_APP_ID=your-github-app-id
+GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=
 EOF
 ```
 
@@ -272,8 +274,10 @@ setup and security checklist.
 Browser push notifications require the public HTTPS origin in
 `GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`, the VAPID key pair above, and a
 dashboard sign-in from each GitHub user who wants job completion notifications.
-Set `GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL` to the public GitHub App avatar URL
-when notifications should use the image configured on the GitHub App.
+Set `GITHUB_AGENT_BRIDGE_GITHUB_APP_ID` or
+`GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG` when notifications should use the image
+configured on the GitHub App automatically. `GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL`
+can still override the notification icon with an explicit URL.
 
 ```bash
 systemctl --user status github-agent-bridge-dashboard.service

@@ -297,7 +297,9 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=https://bridge.example.com
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=replace-with-vapid-private-key
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
-GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=https://avatars.githubusercontent.com/in/your-github-app-id?s=192&v=4
+GITHUB_AGENT_BRIDGE_GITHUB_APP_ID=your-github-app-id
+GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=
 ```
 
 See [`dashboard-github-oauth.md`](dashboard-github-oauth.md) for the GitHub

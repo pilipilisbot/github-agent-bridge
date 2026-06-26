@@ -1,3 +1,4 @@
+import github_agent_bridge.web_push as web_push
 from github_agent_bridge.queue import JobQueue
 from github_agent_bridge.web_push import notify_job_completion, save_subscription, subscription_status
 
@@ -50,6 +51,7 @@ def test_notify_job_completion_includes_configured_icon(tmp_path, monkeypatch):
     db = tmp_path / "bridge.sqlite3"
     JobQueue(db)
     save_subscription(db, "ecarreras", subscription())
+    monkeypatch.setenv("GITHUB_AGENT_BRIDGE_GITHUB_APP_ID", "67890")
     monkeypatch.setenv("GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL", "https://avatars.githubusercontent.com/in/12345?s=192&v=4")
     sent = []
 
@@ -64,3 +66,48 @@ def test_notify_job_completion_includes_configured_icon(tmp_path, monkeypatch):
     )
 
     assert sent[0]["icon"] == "https://avatars.githubusercontent.com/in/12345?s=192&v=4"
+
+
+def test_notify_job_completion_uses_github_app_id_for_icon(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    save_subscription(db, "ecarreras", subscription())
+    monkeypatch.delenv("GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL", raising=False)
+    monkeypatch.setenv("GITHUB_AGENT_BRIDGE_GITHUB_APP_ID", "12345")
+    sent = []
+
+    notify_job_completion(
+        db,
+        actors=["ecarreras"],
+        job_id=42,
+        work_key="gisce/erp#27315",
+        status="done",
+        summary="agent dispatch queued",
+        sender=lambda sub, payload: sent.append(payload),
+    )
+
+    assert sent[0]["icon"] == "https://avatars.githubusercontent.com/in/12345?s=192&v=4"
+
+
+def test_notify_job_completion_resolves_github_app_slug_for_icon(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    save_subscription(db, "ecarreras", subscription())
+    monkeypatch.delenv("GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL", raising=False)
+    monkeypatch.delenv("GITHUB_AGENT_BRIDGE_GITHUB_APP_ID", raising=False)
+    monkeypatch.setenv("GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG", "bridge-app")
+    monkeypatch.setattr(web_push, "_APP_ICON_CACHE", {})
+    monkeypatch.setattr(web_push, "_github_app_metadata", lambda slug: {"id": 67890, "slug": slug})
+    sent = []
+
+    notify_job_completion(
+        db,
+        actors=["ecarreras"],
+        job_id=42,
+        work_key="gisce/erp#27315",
+        status="done",
+        summary="agent dispatch queued",
+        sender=lambda sub, payload: sent.append(payload),
+    )
+
+    assert sent[0]["icon"] == "https://avatars.githubusercontent.com/in/67890?s=192&v=4"
