@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    color-scheme: light;
+    --color-border: 214 20% 88%;
+    --color-background: 210 20% 98%;
+    --color-foreground: 216 28% 14%;
+    --color-muted: 215 16% 47%;
+    --color-panel: 0 0% 100%;
+    --color-primary: 212 92% 42%;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  @layer base {
+    :root {
+      color-scheme: dark;
+      --color-border: 217 24% 25%;
+      --color-background: 222 33% 8%;
+      --color-foreground: 214 30% 92%;
+      --color-muted: 215 18% 68%;
+      --color-panel: 222 31% 13%;
+      --color-primary: 212 92% 58%;
+    }
+  }
+}
+
 @keyframes live-pulse {
   0%,
   100% {
@@ -48,11 +74,116 @@
     height: 36px;
     width: 100%;
     border-radius: 6px;
-    border: 1px solid hsl(214 20% 88%);
-    background: white;
+    border: 1px solid hsl(var(--color-border));
+    background: hsl(var(--color-panel));
     padding: 0 10px;
-    color: hsl(216 28% 14%);
+    color: hsl(var(--color-foreground));
     font: inherit;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  @layer utilities {
+    .bg-white,
+    .bg-white\/70,
+    .bg-white\/80,
+    .hover\:bg-white:hover {
+      background-color: hsl(var(--color-panel));
+    }
+
+    .bg-slate-50,
+    .bg-slate-50\/60,
+    .bg-slate-50\/70,
+    .bg-slate-100,
+    .hover\:bg-slate-50:hover,
+    .hover\:bg-slate-100:hover {
+      background-color: hsl(222 28% 17%);
+    }
+
+    .bg-blue-50 {
+      background-color: hsl(217 55% 18%);
+    }
+
+    .bg-amber-50,
+    .bg-amber-100,
+    .hover\:bg-amber-100:hover {
+      background-color: hsl(38 72% 16%);
+    }
+
+    .bg-red-50,
+    .hover\:bg-red-50:hover {
+      background-color: hsl(0 48% 18%);
+    }
+
+    .bg-emerald-50,
+    .hover\:bg-emerald-100:hover {
+      background-color: hsl(154 45% 16%);
+    }
+
+    .border-slate-200,
+    .border-slate-300,
+    .border-slate-700,
+    .border-slate-800 {
+      border-color: hsl(var(--color-border));
+    }
+
+    .border-amber-200,
+    .border-amber-300 {
+      border-color: hsl(38 62% 36%);
+    }
+
+    .border-blue-200,
+    .border-blue-300 {
+      border-color: hsl(217 62% 40%);
+    }
+
+    .border-red-200,
+    .border-red-300 {
+      border-color: hsl(0 56% 42%);
+    }
+
+    .border-emerald-300 {
+      border-color: hsl(154 52% 39%);
+    }
+
+    .text-slate-600,
+    .text-slate-700,
+    .text-slate-800,
+    .text-slate-900,
+    .hover\:text-slate-900:hover {
+      color: hsl(var(--color-foreground));
+    }
+
+    .text-slate-300,
+    .text-slate-400,
+    .text-slate-500,
+    .hover\:text-slate-500:hover {
+      color: hsl(var(--color-muted));
+    }
+
+    .text-blue-700 {
+      color: hsl(213 94% 78%);
+    }
+
+    .text-amber-700,
+    .text-amber-800,
+    .text-amber-900,
+    .text-amber-950 {
+      color: hsl(43 96% 84%);
+    }
+
+    .text-red-600,
+    .text-red-700,
+    .text-red-950 {
+      color: hsl(0 91% 83%);
+    }
+
+    .text-emerald-700,
+    .text-emerald-800,
+    .text-emerald-900,
+    .text-emerald-950 {
+      color: hsl(151 81% 80%);
+    }
   }
 }
 
