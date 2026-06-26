@@ -9,6 +9,7 @@ from .dispatch import GitHubClient, OpenClawDispatcher
 from .policy import Policy
 from .queue import JobQueue
 from .session_events import redact_event_detail
+from .web_push import notify_job_completion
 
 
 NO_FOLLOWUP_OK_MARKERS = (
@@ -57,6 +58,7 @@ class ExecutorPool:
         job = self.queue.claim_next(worker_id)
         if not job:
             return False
+        dispatched = False
         try:
             assigned_to_bot = self.github.is_assigned_to_current_user(job.context)
             authored_by_bot = self.github.is_pull_request_authored_by_current_user(job.context)
@@ -87,6 +89,7 @@ class ExecutorPool:
                 reaction_ok=reaction_ok,
                 activity_callback=lambda event_type, summary, detail: self.queue.add_session_event(job.id, event_type, summary, redact_event_detail(detail)),
             )
+            dispatched = True
             dispatch_detail = "\n".join(part for part in [result.stdout, result.stderr] if part)
             self.queue.add_session_event(
                 job.id,
@@ -103,26 +106,51 @@ class ExecutorPool:
                     if job.attempts <= self.config.missing_followup_retries:
                         self.queue.requeue_running(job.id, "agent finished without visible GitHub follow-up; auto-requeued", detail)
                         return True
-                    self.queue.finish(job.id, "blocked", summary, detail)
+                    self._finish(job, "blocked", summary, detail, notify_completion=True)
                     return True
                 summary = "👀 reaction ok + agent dispatch queued" if reaction_ok else "agent dispatch queued; reaction failed or unavailable"
                 detail = f"followup_url={followup_url}; {result.detail}" if followup_url else result.detail
-                self.queue.finish(job.id, "done", summary, detail)
+                self._finish(job, "done", summary, detail, notify_completion=True, followup_url=followup_url)
             else:
                 reason = "dispatch timeout" if result.timed_out else f"dispatch failed rc={result.returncode}"
                 followup_url = self.github.visible_followup_after_trigger(job.context)
                 if followup_url:
                     summary = "agent produced visible GitHub follow-up before dispatch failure"
                     detail = f"followup_url={followup_url}; {result.detail}"
-                    self.queue.finish(job.id, "done", summary, detail)
+                    self._finish(job, "done", summary, detail, notify_completion=True, followup_url=followup_url)
                     return True
                 if self._dispatch_failure_is_retryable(result) and job.attempts <= self.config.transient_dispatch_retries:
                     self.queue.requeue_running(job.id, "transient OpenClaw dispatch failure; auto-requeued", result.detail)
                     return True
-                self.queue.finish(job.id, "blocked", reason, result.detail)
+                self._finish(job, "blocked", reason, result.detail, notify_completion=True)
         except Exception as exc:
-            self.queue.finish(job.id, "blocked", f"executor exception: {type(exc).__name__}", str(exc))
+            self._finish(job, "blocked", f"executor exception: {type(exc).__name__}", str(exc), notify_completion=dispatched)
         return True
+
+    def _finish(
+        self,
+        job,
+        status: str,
+        summary: str,
+        detail: str | None = None,
+        *,
+        notify_completion: bool = False,
+        followup_url: str | None = None,
+    ) -> None:
+        self.queue.finish(job.id, status, summary, detail)
+        if not notify_completion:
+            return
+        actors = [actor for actor in [job.trigger_actor, *self.queue.coalesced_trigger_actors(job.id)] if actor]
+        notify_job_completion(
+            self.queue.path,
+            actors=actors,
+            job_id=job.id,
+            work_key=job.work_key,
+            status=status,
+            summary=summary,
+            detail=detail,
+            followup_url=followup_url,
+        )
 
     def _missing_followup_is_acceptable(self, job, result) -> bool:
         if job.action not in {"reply_comment", "sync_after_merge"}:

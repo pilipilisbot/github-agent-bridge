@@ -255,6 +255,13 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_USERS=your-github-login
 GITHUB_AGENT_BRIDGE_DASHBOARD_ALLOWED_TEAMS=
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_USERS=your-github-login
 GITHUB_AGENT_BRIDGE_DASHBOARD_ADMIN_TEAMS=
+GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=https://bridge.example.com
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=replace-with-vapid-private-key
+GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
+GITHUB_AGENT_BRIDGE_GITHUB_APP_ID=your-github-app-id
+GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG=
+GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=
 EOF
 ```
 
@@ -263,6 +270,14 @@ Create the GitHub OAuth App with callback URL
 the public HTTPS origin when using a reverse proxy. See
 [`dashboard-github-oauth.md`](dashboard-github-oauth.md) for the full GitHub
 setup and security checklist.
+
+Browser push notifications require the public HTTPS origin in
+`GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`, the VAPID key pair above, and a
+dashboard sign-in from each GitHub user who wants job completion notifications.
+Set `GITHUB_AGENT_BRIDGE_GITHUB_APP_ID` or
+`GITHUB_AGENT_BRIDGE_GITHUB_APP_SLUG` when notifications should use the image
+configured on the GitHub App automatically. `GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL`
+can still override the notification icon with an explicit URL.
 
 ```bash
 systemctl --user status github-agent-bridge-dashboard.service
