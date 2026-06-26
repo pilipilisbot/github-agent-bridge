@@ -24,7 +24,7 @@ self.addEventListener("push", (event) => {
   const options = {
     body: payload.body || "Bridge job finished",
     tag: payload.tag || "github-agent-bridge",
-    icon: "/bridge-icon.svg",
+    icon: payload.icon || "/bridge-icon.svg",
     badge: "/bridge-badge.svg",
     timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp,
     requireInteraction: isBlocked,

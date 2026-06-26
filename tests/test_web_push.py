@@ -44,3 +44,23 @@ def test_notify_job_completion_sends_to_matching_human_subscriptions(tmp_path):
     assert sent[0][1]["github_url"] == "https://github.com/gisce/erp/pull/27315#issuecomment-2"
     assert sent[0][1]["followup_url"] == "https://github.com/gisce/erp/pull/27315#issuecomment-2"
     assert sent[0][1]["timestamp"].endswith("Z")
+
+
+def test_notify_job_completion_includes_configured_icon(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    save_subscription(db, "ecarreras", subscription())
+    monkeypatch.setenv("GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL", "https://avatars.githubusercontent.com/in/12345?s=192&v=4")
+    sent = []
+
+    notify_job_completion(
+        db,
+        actors=["ecarreras"],
+        job_id=42,
+        work_key="gisce/erp#27315",
+        status="done",
+        summary="agent dispatch queued",
+        sender=lambda sub, payload: sent.append(payload),
+    )
+
+    assert sent[0]["icon"] == "https://avatars.githubusercontent.com/in/12345?s=192&v=4"

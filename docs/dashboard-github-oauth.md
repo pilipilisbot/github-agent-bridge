@@ -66,6 +66,7 @@ GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL=
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PUBLIC_KEY=
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_PRIVATE_KEY=
 GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT=mailto:admin@example.com
+GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL=https://avatars.githubusercontent.com/in/your-github-app-id?s=192&v=4
 EOF
 chmod 600 ~/.config/github-agent-bridge/env
 ```
@@ -99,6 +100,8 @@ Use at least one authorization allowlist:
   used by the executor to send job completion pushes.
 - `GITHUB_AGENT_BRIDGE_WEB_PUSH_VAPID_CONTACT`: VAPID `sub` claim, usually a
   `mailto:` contact for the operator.
+- `GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL`: optional notification icon. Use the
+  public GitHub App avatar URL to show the image configured on the app.
 
 If all allowlists are empty, any authenticated GitHub user is accepted. That is
 only appropriate for isolated local development.

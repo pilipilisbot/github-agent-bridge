@@ -164,6 +164,7 @@ def _job_completion_payload(
 ) -> dict[str, Any]:
     base_url = (dashboard_url or os.getenv("GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL", "")).rstrip("/")
     dashboard_job_url = f"{base_url}/jobs/{job_id}" if base_url else f"/jobs/{job_id}"
+    icon_url = os.getenv("GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL", "").strip()
     return {
         "title": f"Bridge job {status}",
         "body": f"{work_key} finished with status {status}",
@@ -177,6 +178,7 @@ def _job_completion_payload(
         "status": status,
         "summary": summary,
         "detail": detail,
+        "icon": icon_url or None,
         "timestamp": utc_now(),
     }
 
