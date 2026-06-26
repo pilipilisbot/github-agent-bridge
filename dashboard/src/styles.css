@@ -14,8 +14,8 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  @layer base {
+@layer base {
+  @media (prefers-color-scheme: dark) {
     :root {
       color-scheme: dark;
       --color-border: 217 24% 25%;
@@ -82,8 +82,8 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  @layer utilities {
+@layer utilities {
+  @media (prefers-color-scheme: dark) {
     .bg-white,
     .bg-white\/70,
     .bg-white\/80,
