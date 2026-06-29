@@ -24,6 +24,27 @@ def intent_policy(**kwargs):
     )
 
 
+def test_queue_expands_user_in_db_path(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    JobQueue("~/state/q.sqlite3")
+
+    assert (home / "state" / "q.sqlite3").exists()
+    assert not (tmp_path / "~").exists()
+
+
+def test_connect_recreates_missing_parent_directory(tmp_path):
+    q = object.__new__(JobQueue)
+    q.path = tmp_path / "missing" / "q.sqlite3"
+
+    with q.connect() as con:
+        con.execute("SELECT 1")
+
+    assert q.path.exists()
+
+
 def test_enqueue_and_coalesce_same_work_key(tmp_path, monkeypatch):
     monkeypatch.setattr("github_agent_bridge.actors.github_actor_details_for_context", lambda ctx, *, gh_bin="gh": None)
     q = JobQueue(tmp_path / "q.sqlite3")

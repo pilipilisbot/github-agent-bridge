@@ -28,11 +28,11 @@ COALESCE_STATUSES = ("pending", "waiting_approval")
 
 class JobQueue:
     def __init__(self, path: str | Path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = Path(path).expanduser()
         self.init()
 
     def connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
