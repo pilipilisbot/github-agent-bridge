@@ -178,9 +178,9 @@ def test_pr_followup_can_request_issue_creation():
     assert classify_work_intent(subject, body, {"giscebot"}) == "work_allowed"
 
 
-def test_pr_assignment_allows_work():
+def test_pr_assignment_is_review_only_without_explicit_write_request():
     subject = "Re: [gisce/erp] Permitir caller en los dominios (PR #27315)"
     body = "ecarreras assigned @pilipilisbot to this pull request."
 
     assert classify_github_action(subject, body, {"pilipilisbot"}) == "open_issue"
-    assert classify_work_intent(subject, body, {"pilipilisbot"}) == "work_allowed"
+    assert classify_work_intent(subject, body, {"pilipilisbot"}) == "review_only"

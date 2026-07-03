@@ -77,6 +77,10 @@ def coauthor_identity_for_job(job: Job) -> str:
     return f"Use this commit trailer when committing requested work: `Co-authored-by: {login} <{email}>`"
 
 
+def action_mode_for_job(job: Job) -> str:
+    return "fix_allowed" if job.work_intent == "work_allowed" else "review_only"
+
+
 class RunMode(StrEnum):
     SHADOW = "shadow"  # no external side effects: no GitHub reaction, no OpenClaw dispatch
     DRY_RUN = "dry-run"  # no external side effects, but render intended commands/actions
@@ -488,6 +492,7 @@ class OpenClawDispatcher:
             thread=thread,
             action=job.action,
             work_intent=job.work_intent,
+            action_mode=action_mode_for_job(job),
             url=job.context.short_url,
             message_id=job.message_id,
             subject=job.subject,
@@ -568,6 +573,10 @@ class OpenClawDispatcher:
             self.build_prompt(job, policy),
         ]
         env = os.environ.copy()
+        env["GITHUB_AGENT_BRIDGE_ACTION_MODE"] = action_mode_for_job(job)
+        env["GITHUB_AGENT_BRIDGE_WORK_INTENT"] = job.work_intent
+        env["GITHUB_AGENT_BRIDGE_ALLOW_REPOSITORY_WRITE"] = "1" if job.work_intent == "work_allowed" else "0"
+        env["GITHUB_AGENT_BRIDGE_ALLOW_PUSH"] = "1" if job.work_intent == "work_allowed" else "0"
         if self.node_bin:
             env["PATH"] = os.path.dirname(self.node_bin) + os.pathsep + env.get("PATH", "")
         if self.mode != RunMode.LIVE:

@@ -3,6 +3,7 @@ repo={repo}
 thread={thread}
 action={action}
 work_intent={work_intent}
+action_mode={action_mode}
 url={url}
 message_id={message_id}
 subject={subject}

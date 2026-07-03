@@ -138,7 +138,7 @@ def enqueue_sync_after_merge(queue: JobQueue):
     return job
 
 
-def test_assigned_pr_comment_upgrades_to_work_allowed(tmp_path):
+def test_assigned_pr_comment_keeps_review_only_without_explicit_write_request(tmp_path):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     enqueue_pr_comment(queue)
     dispatcher = RecordingDispatcher()
@@ -146,10 +146,12 @@ def test_assigned_pr_comment_upgrades_to_work_allowed(tmp_path):
     pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=FakeGitHub(assigned=True), config=ExecutorConfig(run_once=True))
     assert pool.work_one("worker-test") is True
 
-    assert dispatcher.jobs[0].work_intent == "work_allowed"
+    assert dispatcher.jobs[0].work_intent == "review_only"
     stored = queue.get(dispatcher.jobs[0].id)
     assert stored is not None
-    assert stored.work_intent == "work_allowed"
+    assert stored.work_intent == "review_only"
+    event_types = [event["event_type"] for event in job_session_events(queue.path, stored.id)]
+    assert "action_mode_retained" in event_types
 
 
 def test_executor_records_session_activity_events(tmp_path):
@@ -289,7 +291,7 @@ def test_coalesced_notifications_are_reacted_to_before_dispatch(tmp_path):
     assert 2 in github.eye_comment_ids
 
 
-def test_bot_authored_pr_review_comment_upgrades_to_work_allowed(tmp_path):
+def test_bot_authored_pr_review_comment_keeps_review_only_without_explicit_write_request(tmp_path):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     enqueue_pr_comment(queue)
     dispatcher = RecordingDispatcher()
@@ -297,10 +299,12 @@ def test_bot_authored_pr_review_comment_upgrades_to_work_allowed(tmp_path):
     pool = ExecutorPool(queue, Policy(trusted_orgs={"gisce"}), dispatcher, github=FakeGitHub(assigned=False, mentioned=True, authored=True), config=ExecutorConfig(run_once=True))
     assert pool.work_one("worker-test") is True
 
-    assert dispatcher.jobs[0].work_intent == "work_allowed"
+    assert dispatcher.jobs[0].work_intent == "review_only"
     stored = queue.get(dispatcher.jobs[0].id)
     assert stored is not None
-    assert stored.work_intent == "work_allowed"
+    assert stored.work_intent == "review_only"
+    event_types = [event["event_type"] for event in job_session_events(queue.path, stored.id)]
+    assert "action_mode_retained" in event_types
 
 
 def test_unassigned_unmentioned_pr_comment_reacts_without_dispatch(tmp_path):
@@ -361,6 +365,7 @@ def test_retry_dispatches_even_when_prior_bot_comment_exists(tmp_path):
 def test_work_allowed_dispatch_auto_retries_once_without_visible_github_followup(tmp_path):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     job = enqueue_pr_comment(queue)
+    queue.update_work_intent(job.id, "work_allowed", "explicit implementation request")
     dispatcher = RecordingDispatcher()
     github = FakeGitHub(assigned=True)
     github.followup_url = None
@@ -379,6 +384,7 @@ def test_work_allowed_dispatch_auto_retries_once_without_visible_github_followup
 def test_work_allowed_dispatch_blocks_after_auto_retry_without_visible_github_followup(tmp_path):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     job = enqueue_pr_comment(queue)
+    queue.update_work_intent(job.id, "work_allowed", "explicit implementation request")
     dispatcher = RecordingDispatcher()
     github = FakeGitHub(assigned=True)
     github.followup_url = None

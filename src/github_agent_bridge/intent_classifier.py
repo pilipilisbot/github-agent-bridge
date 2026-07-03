@@ -9,7 +9,7 @@ from typing import Any
 from .feedback import _extract_json_object, _openclaw_text_from_json, compact, load_prompt_rule, session_id_for_event
 from .models import GitHubContext, Notification
 from .parser import github_event_flags
-from .policy import IntentClassifier, Policy
+from .policy import DEFAULT_BOT_LOGINS, IntentClassifier, Policy
 
 ALLOWED_ACTIONS = {
     "reply_comment",
@@ -20,8 +20,9 @@ ALLOWED_ACTIONS = {
     "archive_notification",
 }
 ALLOWED_WORK_INTENTS = {"review_only", "work_allowed"}
+ALLOWED_WRITE_PERMISSIONS = {"none", "state_change_allowed"}
 INTENT_CLASSIFIER_PROMPT = load_prompt_rule("intent_classifier.md")
-HUMAN_COMMENT_TARGET_KINDS = {"issue_comment", "review_comment", "commit_comment"}
+COMMENT_TARGET_KINDS = {"issue_comment", "review_comment", "commit_comment", "review"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,9 @@ class IntentClassification:
     confidence: float
     reason: str
     applied: bool
+    addressed_to_agent: bool = False
+    write_permission: str = "none"
+    scope: str = ""
     main_request: str = ""
     subordinate_reason: str = ""
 
@@ -47,7 +51,11 @@ class IntentClassification:
             "confidence": self.confidence,
             "reason": self.reason,
             "applied": self.applied,
+            "addressed_to_agent": self.addressed_to_agent,
+            "write_permission": self.write_permission,
         }
+        if self.scope:
+            metadata["scope"] = self.scope
         if self.main_request:
             metadata["main_request"] = self.main_request
         if self.subordinate_reason:
@@ -64,18 +72,26 @@ def should_classify_with_llm(
     cfg = policy.intent_classifier
     if not cfg.enabled:
         return False
-    if ctx.target_kind not in HUMAN_COMMENT_TARGET_KINDS:
+    if ctx.target_kind not in COMMENT_TARGET_KINDS:
         return False
     if not policy.trusted_source(n, ctx):
         return False
     flags = github_event_flags(n.subject, n.body, policy.bot_logins)
-    if not flags["bot_mentioned"]:
-        return False
     if cfg.only_when_parser_defaulted and not (
         parser_result.action == "reply_comment" and parser_result.work_intent == "review_only"
+        or flags["bot_mentioned"]
     ):
         return False
     return True
+
+
+def agent_identity(policy: Policy | None, agent: str | None = None) -> dict[str, object]:
+    logins = sorted((policy.bot_logins if policy else set(DEFAULT_BOT_LOGINS)) or set())
+    return {
+        "github_logins": logins,
+        "aliases": logins,
+        "openclaw_agent": agent or "",
+    }
 
 
 def build_intent_prompt(
@@ -83,12 +99,16 @@ def build_intent_prompt(
     ctx: GitHubContext,
     parser_result: ParserResult,
     prompt_template: str | None = None,
+    *,
+    policy: Policy | None = None,
+    agent: str | None = None,
 ) -> str:
     event = {
         "subject": n.subject,
         "body": compact(n.body, 2400),
         "from_addr": n.from_addr,
         "message_id": n.message_id,
+        "agent_identity": agent_identity(policy, agent),
         "github_context": json.loads(ctx.to_json()),
         "parser_result": {
             "action": parser_result.action,
@@ -99,11 +119,30 @@ def build_intent_prompt(
     return template.replace("{event_json}", json.dumps(event, ensure_ascii=False, sort_keys=True))
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return bool(value)
+
+
 def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentClassification:
     action = str(result.get("action") or "").strip().lower()
     work_intent = str(result.get("work_intent") or result.get("intent") or "").strip().lower()
+    addressed_to_agent = _as_bool(result.get("addressed_to_agent"))
+    write_permission = str(result.get("write_permission") or "none").strip().lower()
+    if write_permission not in ALLOWED_WRITE_PERMISSIONS:
+        write_permission = "none"
+    if not addressed_to_agent:
+        action = "archive_notification"
+        work_intent = "review_only"
+        write_permission = "none"
+    elif work_intent == "work_allowed" and write_permission != "state_change_allowed":
+        work_intent = "review_only"
     confidence = float(result.get("confidence") or 0)
     confidence = min(1.0, max(0.0, confidence))
+    scope = compact(str(result.get("scope") or ""), 500)
     main_request = compact(str(result.get("main_request") or ""), 500)
     subordinate_reason = compact(str(result.get("subordinate_reason") or ""), 500)
     reason = compact(str(result.get("reason") or ""), 500)
@@ -114,6 +153,9 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
         confidence=confidence,
         reason=reason,
         applied=applied,
+        addressed_to_agent=addressed_to_agent,
+        write_permission=write_permission,
+        scope=scope,
         main_request=main_request,
         subordinate_reason=subordinate_reason,
     )
@@ -146,6 +188,7 @@ def classify_notification_with_llm(
     parser_result: ParserResult,
     cfg: IntentClassifier,
     *,
+    policy: Policy | None = None,
     agent: str | None = None,
     prompt_template: str | None = None,
 ) -> IntentClassification:
@@ -160,7 +203,7 @@ def classify_notification_with_llm(
         "--thinking",
         cfg.thinking,
         "--message",
-        build_intent_prompt(n, ctx, parser_result, prompt_template),
+        build_intent_prompt(n, ctx, parser_result, prompt_template, policy=policy, agent=agent),
     ]
     if agent:
         cmd.extend(["--agent", agent])

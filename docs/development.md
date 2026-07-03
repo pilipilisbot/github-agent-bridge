@@ -146,11 +146,11 @@ docs: clarify canary rollout
 
 ## PR review read-only invariant
 
-PR review follow-ups must stay read-only by default. A comment on a PR that mentions the bot but does not explicitly ask to implement/apply/fix/push and is not an assignment should be classified as `review_only`, even when the repository role is `maintainer` or `owner`. If the bot is assigned to the PR/issue, classify or upgrade to `work_allowed` because assignment means ownership of the work. Maintainer/owner controls judgment; `review_only` forbids editing, committing, pushing, merging, or updating the PR branch.
+PR review follow-ups must stay read-only by default. A comment on a PR that mentions, assigns, or replies to the bot but does not explicitly ask the configured agent to perform repository state changes should be classified as `review_only`, even when the repository role is `maintainer` or `owner`. Assignment, review request, and bot PR authorship can make the event relevant to the agent, but they do not grant write permission by themselves. Maintainer/owner controls judgment; `review_only` forbids editing, committing, pushing, merging, or updating the PR branch.
 
 ### Comment value / no-op reaction rule
 
-For PR/issue comments that produce `reply_comment`, the bridge checks the actual GitHub comment before dispatch. If the comment is not addressed to the authenticated bot and the bot is not assigned, the bridge reacts with 👀 plus 👍 and skips agent dispatch. “Addressed to the bot” currently means the bot is the first mentioned user; later mentions can be merely referential. This avoids low-value “I checked / no extra input” comments when the conversation is clearly directed at someone else.
+For PR/issue comments that produce `reply_comment`, the bridge checks the actual GitHub comment before dispatch. If the comment is not addressed to the authenticated bot and the bot is not assigned, the bridge reacts with 👀 plus 👍 and skips agent dispatch. With `intentClassifier.enabled`, the classifier receives the configured agent identity and can classify addressed-to-agent semantics without a hard-coded bot login. This avoids low-value “I checked / no extra input” comments when the conversation is clearly directed at someone else.
 
 Reviews with no actionable code comments (for example “generated no new comments”, “wasn't able to review any files”, or “no actionable findings”) are treated as no-op: the bridge reacts 👀 + 👍 and skips agent dispatch, even if the bot is assigned.
 
