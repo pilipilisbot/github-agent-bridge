@@ -101,6 +101,8 @@ type Job = {
   action: string;
   decision: string;
   intent: string;
+  action_mode?: string;
+  intent_classifier?: IntentClassifierSummary | null;
   subject: string;
   trigger_actor: string | null;
   trigger_actor_avatar_url: string | null;
@@ -124,6 +126,27 @@ type JobModelRoute = {
   model: string | null;
   thinking: string | null;
   summary: string;
+};
+
+type IntentClassifierSummary = {
+  enabled: boolean;
+  parser?: {
+    action?: string;
+    work_intent?: string;
+  };
+  llm?: {
+    action?: string;
+    work_intent?: string;
+    addressed_to_agent?: boolean;
+    write_permission?: string;
+    scope?: string;
+    main_request?: string;
+    subordinate_reason?: string;
+    confidence?: number;
+    reason?: string;
+    applied?: boolean;
+  };
+  error?: string | null;
 };
 
 type WorklogEntry = {
@@ -2926,6 +2949,7 @@ function JobDetail({ job, session, sessionEvents, transcript, now, compact = fal
         <MiniStat label="Reasoning" value={modelRouteThinking(job.model_route)} />
         <MiniStat label="Route" value={modelRouteSource(job.model_route)} />
       </div>
+      <IntentClassifierPanel job={job} compact={compact} />
       <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-4")}>
         <MiniStat label="Created" value={<TimeText value={job.created_at} compact relative now={now} />} />
         <MiniStat label="Started" value={job.started_at ? <TimeText value={job.started_at} compact relative now={now} /> : "n/a"} />
@@ -2990,6 +3014,59 @@ function JobDetail({ job, session, sessionEvents, transcript, now, compact = fal
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function IntentClassifierPanel({ job, compact = false }: { job: Job; compact?: boolean }) {
+  const classifier = job.intent_classifier ?? null;
+  const llm = classifier?.llm ?? {};
+  const parser = classifier?.parser ?? {};
+  const confidence = typeof llm.confidence === "number" ? `${Math.round(llm.confidence * 100)}%` : "n/a";
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-sm font-semibold">Action mode</h3>
+      <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-4")}>
+        <MiniStat label="Mode" value={job.action_mode ?? (job.intent === "work_allowed" ? "fix_allowed" : "review_only")} />
+        <MiniStat label="Intent" value={job.intent} />
+        <MiniStat label="Addressed" value={classifier ? yesNo(llm.addressed_to_agent) : "n/a"} />
+        <MiniStat label="Write" value={classifier ? llm.write_permission ?? "none" : job.intent === "work_allowed" ? "allowed" : "none"} />
+      </div>
+      {classifier ? (
+        <div className="grid gap-2 rounded-md border border-border bg-panel p-3 text-xs">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <DetailPair label="Classifier" value={classifier.enabled ? "enabled" : "disabled"} />
+            <DetailPair label="Applied" value={yesNo(llm.applied)} />
+            <DetailPair label="Confidence" value={confidence} />
+            <DetailPair label="Parser" value={`${parser.action ?? "n/a"} / ${parser.work_intent ?? "n/a"}`} />
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <DetailPair label="LLM" value={`${llm.action ?? "n/a"} / ${llm.work_intent ?? "n/a"}`} />
+            <DetailPair label="Scope" value={llm.scope || "n/a"} />
+          </div>
+          {llm.main_request ? <DetailPair label="Main request" value={llm.main_request} /> : null}
+          {llm.subordinate_reason ? <DetailPair label="Subordinate reason" value={llm.subordinate_reason} /> : null}
+          {llm.reason ? <DetailPair label="Reason" value={llm.reason} /> : null}
+          {classifier.error ? <DetailPair label="Error" value={classifier.error} tone="danger" /> : null}
+        </div>
+      ) : (
+        <p className="text-xs text-muted">No intent classifier metadata recorded for this job.</p>
+      )}
+    </div>
+  );
+}
+
+function yesNo(value: boolean | undefined) {
+  if (value === true) return "yes";
+  if (value === false) return "no";
+  return "n/a";
+}
+
+function DetailPair({ label, value, tone = "neutral" }: { label: string; value: React.ReactNode; tone?: "neutral" | "danger" }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] font-semibold uppercase text-muted">{label}</div>
+      <div className={cn("mt-0.5 min-w-0 break-words font-mono text-xs [overflow-wrap:anywhere]", tone === "danger" ? "text-red-700" : "text-foreground")}>{value}</div>
     </div>
   );
 }

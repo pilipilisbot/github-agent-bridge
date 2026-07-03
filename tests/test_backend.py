@@ -539,6 +539,24 @@ def test_dashboard_exposes_job_detail_logs_and_metrics(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)
     job, _ = q.enqueue(notif(), Policy(trusted_orgs=["gisce"]))
+    with q.connect() as con:
+        metadata = job.metadata | {
+            "intent_classifier": {
+                "enabled": True,
+                "parser": {"action": "reply_comment", "work_intent": "review_only"},
+                "llm": {
+                    "addressed_to_agent": True,
+                    "action": "reply_comment",
+                    "work_intent": "work_allowed",
+                    "write_permission": "state_change_allowed",
+                    "scope": "Update the PR tests.",
+                    "confidence": 0.91,
+                    "reason": "The comment asks the configured agent to modify repository state.",
+                    "applied": True,
+                },
+            }
+        }
+        con.execute("UPDATE jobs SET metadata_json=?, work_intent=? WHERE id=?", (json.dumps(metadata), "work_allowed", job.id))
     q.finish(job.id, "done", "completed")
 
     detail = get_job_detail(db, job.id)
@@ -546,6 +564,9 @@ def test_dashboard_exposes_job_detail_logs_and_metrics(tmp_path):
     client = TestClient(create_app(DashboardConfig(db=db, require_auth=False)))
 
     assert detail is not None
+    assert detail["action_mode"] == "fix_allowed"
+    assert detail["intent_classifier"]["llm"]["write_permission"] == "state_change_allowed"
+    assert detail["intent_classifier"]["llm"]["scope"] == "Update the PR tests."
     assert detail["worklog"][0]["phase"] == "queued"
     assert metrics["status_counts"]["done"] == 1
     assert list(metrics["by_created_day"].values()) == [1]
