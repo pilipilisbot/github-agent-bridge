@@ -247,6 +247,9 @@ def test_enqueue_can_apply_enabled_llm_intent_classifier(tmp_path, monkeypatch):
             confidence=0.91,
             reason="User asks to create a test.",
             applied=True,
+            addressed_to_agent=True,
+            write_permission="state_change_allowed",
+            scope="Create a test.",
         )
 
     monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)
@@ -280,6 +283,9 @@ def test_enqueue_can_apply_llm_intent_classifier_to_review_comments(tmp_path, mo
             confidence=0.91,
             reason="User asks for an implementation change from a review comment.",
             applied=True,
+            addressed_to_agent=True,
+            write_permission="state_change_allowed",
+            scope="Create a test.",
         )
 
     monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)
@@ -307,6 +313,8 @@ def test_enqueue_falls_back_when_llm_intent_confidence_is_low(tmp_path, monkeypa
             confidence=0.4,
             reason="Unsure.",
             applied=False,
+            addressed_to_agent=True,
+            write_permission="state_change_allowed",
         )
 
     monkeypatch.setattr("github_agent_bridge.queue.classify_notification_with_llm", fake_classify)

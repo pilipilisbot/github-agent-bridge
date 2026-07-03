@@ -309,7 +309,7 @@ Repository role and work intent are intentionally separate:
 - Role controls judgment and authority: owner, maintainer, contributor, or reviewer.
 - Work intent controls allowed actions: for example `review_only` versus `work_allowed`.
 
-For PR review/discussion follow-ups, the bridge classifies the work intent as `review_only` by default unless the human explicitly asks to implement/apply/fix/push or assigns/has assigned the bot to the PR/issue. Assignment means the bot is expected to own the work; follow-up PR/issue comments are upgraded to `work_allowed` while the authenticated bot remains assigned. This keeps maintainer/owner judgment while preventing commits to a contributor PR branch from review discussion.
+For PR review/discussion follow-ups, the bridge classifies the work intent as `review_only` by default unless the trusted intent classifier or parser identifies an explicit request for repository state changes. Assignment, review requests, and PR authorship can make an event relevant to the configured agent, but they do not by themselves grant write permission. This keeps maintainer/owner judgment while preventing commits to a contributor PR branch from review discussion.
 
 Do not treat `review_only` as an automatic role downgrade to `reviewer`. `owner` + `review_only` is valid and means: review with owner-level judgment, explain why yes/why no, and push back when needed, but do not modify code, commit, push, or update PR metadata.
 
@@ -416,6 +416,7 @@ The base prompt is a Python `str.format` template. It may use these placeholders
 | `{thread}` | Issue or PR number. |
 | `{action}` | Classified bridge action. |
 | `{work_intent}` | Work intent, for example `work_allowed` or `review_only`. |
+| `{action_mode}` | Effective action mode exposed to the agent, currently `fix_allowed` for `work_allowed` jobs and `review_only` otherwise. |
 | `{url}` | Short GitHub URL extracted from the notification. |
 | `{message_id}` | Source notification message id. |
 | `{subject}` | Source notification subject. |
@@ -448,7 +449,7 @@ Supported action names currently produced by the parser:
 | `workflow_run_failed` | Notification text contains a GitHub Actions run URL and a failure marker such as `run failed`, `workflow failed`, or `job failed`. | Dispatch trusted CI failure investigation to the agent. |
 | `submit_review` | GitHub requested a review from the bot. | React 👀 and dispatch review-only work that must end with a formal PR review verdict. |
 | `reply_comment` | Bot mentioned, Copilot review, or PR review/comment notification. | React 👀 and dispatch agent work/reply. |
-| `open_issue` | Bot assigned to an issue/PR. | React 👀 and dispatch agent work for the assigned thread. |
+| `open_issue` | User asks to open an issue, or the bot is assigned to an issue/PR. | React 👀 and dispatch the agent with the separately classified work intent. Assignment alone stays `review_only`. |
 
 Other action names can appear in policy, but they have no effect until parser/dispatcher code produces or handles them.
 
@@ -713,7 +714,7 @@ session views can explain which override was used.
 
 ### Comment value / no-op reaction rule
 
-For PR/issue comments that produce `reply_comment`, the bridge checks the actual GitHub comment before dispatch. If the comment is not addressed to the authenticated bot and the bot is not assigned, the bridge reacts with 👀 plus 👍 and skips agent dispatch. “Addressed to the bot” currently means the bot is the first mentioned user; later mentions can be merely referential. This avoids low-value “I checked / no extra input” comments when the conversation is clearly directed at someone else.
+For PR/issue comments that produce `reply_comment`, the bridge checks the actual GitHub comment before dispatch. If the comment is not addressed to the authenticated bot and the bot is not assigned, the bridge reacts with 👀 plus 👍 and skips agent dispatch. With `intentClassifier.enabled`, the classifier receives the configured `botLogins` and routed OpenClaw agent as `agent_identity`, then decides whether the event is addressed to the configured agent without assuming a hard-coded bot login. This avoids low-value “I checked / no extra input” comments when the conversation is clearly directed at someone else.
 
 Reviews with no actionable code comments (for example “generated no new comments”, “wasn't able to review any files”, or “no actionable findings”) are treated as no-op: the bridge reacts 👀 + 👍 and skips agent dispatch, even if the bot is assigned.
 
@@ -721,7 +722,9 @@ Agents must also apply the comment value rule before posting: comment only when 
 
 ## Intent classifier
 
-`intentClassifier` controls an optional enqueue-time LLM classifier for trusted human GitHub comments. It is disabled by default; when enabled, the bridge calls OpenClaw with the packaged `prompt_rules/intent_classifier.md` prompt or `promptOverrides.rules.intent_classifier`, expects JSON output, and uses the result only when confidence is high enough. Low-confidence, invalid, timed-out, or failed classifier calls fall back to the deterministic parser result.
+`intentClassifier` controls an optional enqueue-time LLM classifier for trusted GitHub comments and reviews. It is disabled by default; when enabled, the bridge calls OpenClaw with the packaged `prompt_rules/intent_classifier.md` prompt or `promptOverrides.rules.intent_classifier`, expects JSON output, and uses the result only when confidence is high enough. Low-confidence, invalid, timed-out, or failed classifier calls fall back to the deterministic parser result.
+
+The classifier returns structured semantics: whether the event is addressed to the configured agent, the requested action, the work intent, write permission, and the scope of any requested state change. Results not addressed to the configured agent are normalized to `archive_notification` + `review_only`. Results that request `work_allowed` without `write_permission=state_change_allowed` are normalized back to `review_only`.
 
 Example:
 
@@ -746,7 +749,7 @@ Example:
 | `model` | string | unset | Optional OpenClaw model override for classifier calls. When unset, OpenClaw uses its default model for the session/configuration. |
 | `thinking` | string | `low` | OpenClaw thinking level for classifier calls. Supported values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `adaptive`, and `max`. |
 | `minConfidence` | number | `0.75` | Minimum classifier confidence required before replacing the deterministic parser action/work-intent result. |
-| `onlyWhenParserDefaulted` | boolean | `true` | Run the classifier only when the deterministic parser defaulted to the conservative comment classification. Set to `false` to let the classifier arbitrate all eligible trusted human comments. |
+| `onlyWhenParserDefaulted` | boolean | `true` | Run the classifier for conservative comment/review classifications and for bot-mentioned comments even when the parser saw implementation-looking language. Set to `false` to let the classifier arbitrate all eligible trusted GitHub comments and reviews. |
 | `openclawBin` | string | `openclaw` | OpenClaw executable used for classifier subprocess calls. |
 | `sessionId` | string | `github-agent-bridge-intent` | Base session id prefix for classifier calls. The bridge derives an isolated per-event session id from this value plus routed agent and GitHub notification/context data. |
 | `timeout` | integer | `60` | Maximum seconds to wait for one classifier call before falling back to parser behavior. |

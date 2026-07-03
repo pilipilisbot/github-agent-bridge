@@ -136,7 +136,7 @@ The bridge is conservative by default. `policy.json` decides what is trusted, wh
 }
 ```
 
-For PR review/discussion follow-ups, the bridge defaults to `review_only` unless the human explicitly asks to implement/apply/fix/push, assigns/has assigned the bot to the PR/issue, or the PR was authored by the bot and the review/comment is asking it to adjust its own work.
+For PR review/discussion follow-ups, the bridge defaults to `review_only` unless the trusted intent classifier or parser identifies an explicit request for repository state changes. Assignment, review requests, and PR authorship can make an event relevant to the bot, but they do not by themselves grant write permission.
 
 Repository roles control **judgment**; work intent controls **allowed actions**. For example, `owner` + `review_only` means “review with owner-level judgment, but do not modify code or PR metadata”.
 

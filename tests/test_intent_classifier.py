@@ -10,7 +10,7 @@ from github_agent_bridge.intent_classifier import (
 )
 from github_agent_bridge.models import Notification
 from github_agent_bridge.parser import extract_github_context
-from github_agent_bridge.policy import IntentClassifier
+from github_agent_bridge.policy import IntentClassifier, Policy
 
 
 def notification(message_id, body):
@@ -79,15 +79,39 @@ def test_packaged_intent_prompt_requires_semantic_decomposition():
 
     assert '"main_request"' in prompt
     assert '"subordinate_reason"' in prompt
+    assert '"agent_identity"' in prompt
+    assert '"github_logins": ["pilipilisbot"]' in prompt
+    assert '"addressed_to_agent"' in prompt
+    assert '"write_permission"' in prompt
     assert "Classify from the main request" in prompt
+    assert "regardless of language" in prompt
     assert "parser_result" in prompt
+
+
+def test_build_intent_prompt_uses_configured_agent_identity():
+    notif = notification("<1@github.com>", "@acme-agent please review https://github.com/gisce/erp/pull/1#issuecomment-10")
+
+    prompt = build_intent_prompt(
+        notif,
+        extract_github_context(notif.body),
+        ParserResult("reply_comment", "review_only"),
+        policy=Policy(bot_logins={"acme-agent"}),
+        agent="erp-reviewer",
+    )
+
+    assert '"github_logins": ["acme-agent"]' in prompt
+    assert '"openclaw_agent": "erp-reviewer"' in prompt
+    assert "giscebot" not in prompt
 
 
 def test_normalize_result_preserves_semantic_decomposition_metadata():
     result = normalize_result(
         {
+            "addressed_to_agent": True,
             "action": "reply_comment",
             "work_intent": "work_allowed",
+            "write_permission": "state_change_allowed",
+            "scope": "Create one PR per notification.",
             "main_request": "Fer una pull request separada per cada notificació.",
             "subordinate_reason": "Així serà més fàcil revisar-ho i integrar-ho.",
             "confidence": 0.98,
@@ -97,8 +121,48 @@ def test_normalize_result_preserves_semantic_decomposition_metadata():
     )
 
     assert result.applied is True
+    assert result.to_metadata()["addressed_to_agent"] is True
+    assert result.to_metadata()["write_permission"] == "state_change_allowed"
+    assert result.to_metadata()["scope"] == "Create one PR per notification."
     assert result.to_metadata()["main_request"] == "Fer una pull request separada per cada notificació."
     assert result.to_metadata()["subordinate_reason"] == "Així serà més fàcil revisar-ho i integrar-ho."
+
+
+def test_normalize_result_downgrades_unaddressed_events_to_archive():
+    result = normalize_result(
+        {
+            "addressed_to_agent": "false",
+            "action": "reply_comment",
+            "work_intent": "work_allowed",
+            "write_permission": "state_change_allowed",
+            "confidence": 0.95,
+            "reason": "Copilot suggested a fix but did not address the configured agent.",
+        },
+        0.75,
+    )
+
+    assert result.applied is True
+    assert result.action == "archive_notification"
+    assert result.work_intent == "review_only"
+    assert result.write_permission == "none"
+
+
+def test_normalize_result_requires_write_permission_for_work_allowed():
+    result = normalize_result(
+        {
+            "addressed_to_agent": True,
+            "action": "reply_comment",
+            "work_intent": "work_allowed",
+            "write_permission": "none",
+            "confidence": 0.95,
+            "reason": "The request is addressed to the agent but only asks for review.",
+        },
+        0.75,
+    )
+
+    assert result.applied is True
+    assert result.action == "reply_comment"
+    assert result.work_intent == "review_only"
 
 
 def test_classify_notification_with_llm_uses_isolated_session_id(monkeypatch):
@@ -116,8 +180,10 @@ def test_classify_notification_with_llm_uses_isolated_session_id(monkeypatch):
                             {
                                 "text": json.dumps(
                                     {
+                                        "addressed_to_agent": True,
                                         "action": "reply_comment",
                                         "work_intent": "work_allowed",
+                                        "write_permission": "state_change_allowed",
                                         "confidence": 0.92,
                                         "reason": "User asked for implementation.",
                                     }

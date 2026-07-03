@@ -99,6 +99,25 @@ def parse_model_route_detail(detail: str | None) -> dict[str, Any]:
     }
 
 
+def action_mode_for_intent(work_intent: str | None) -> str:
+    return "fix_allowed" if work_intent == "work_allowed" else "review_only"
+
+
+def intent_classifier_summary(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    classifier = metadata.get("intent_classifier")
+    if not isinstance(classifier, dict):
+        return None
+    parser = classifier.get("parser") if isinstance(classifier.get("parser"), dict) else {}
+    llm = classifier.get("llm") if isinstance(classifier.get("llm"), dict) else {}
+    error = classifier.get("error")
+    return {
+        "enabled": bool(classifier.get("enabled")),
+        "parser": parser,
+        "llm": llm,
+        "error": str(error) if error else None,
+    }
+
+
 def jobs_select_sql(con: sqlite3.Connection) -> str:
     if not table_exists(con, "job_session_events"):
         return "SELECT * FROM jobs"
@@ -117,6 +136,7 @@ def jobs_select_sql(con: sqlite3.Connection) -> str:
 
 def job_summary(row: sqlite3.Row) -> dict[str, Any]:
     context = json.loads(row["context_json"] or "{}")
+    metadata = json.loads(row["metadata_json"] or "{}")
     return {
         "id": row["id"],
         "work_key": row["work_key"],
@@ -126,6 +146,7 @@ def job_summary(row: sqlite3.Row) -> dict[str, Any]:
         "action": row["action"],
         "decision": row["decision"],
         "intent": row["work_intent"],
+        "action_mode": action_mode_for_intent(row["work_intent"]),
         "subject": row["subject"],
         "trigger_actor": row_get(row, "trigger_actor"),
         "trigger_actor_avatar_url": row_get(row, "trigger_actor_avatar_url"),
@@ -141,6 +162,7 @@ def job_summary(row: sqlite3.Row) -> dict[str, Any]:
         "runtime_seconds": duration_seconds(row["started_at"], row["finished_at"]),
         "github_urls": context.get("urls", []),
         "model_route": parse_model_route_detail(row_get(row, "model_route_detail")),
+        "intent_classifier": intent_classifier_summary(metadata),
     }
 
 

@@ -65,6 +65,7 @@ class JobQueue:
                     ctx,
                     parser_result,
                     policy.intent_classifier,
+                    policy=policy,
                     agent=policy.route_for(ctx.repo).agent,
                     prompt_template=(
                         feedback.load_prompt_override(path)

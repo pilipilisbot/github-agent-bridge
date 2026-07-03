@@ -78,7 +78,12 @@ class ExecutorPool:
                 return True
             if job.action == "reply_comment" and job.work_intent == "review_only" and (assigned_to_bot or authored_by_bot):
                 reason = "PR/issue assigned to authenticated bot" if assigned_to_bot else "PR authored by authenticated bot"
-                job = self.queue.update_work_intent(job.id, "work_allowed", f"{reason}; upgraded review-only comment to work_allowed") or job
+                self.queue.add_session_event(
+                    job.id,
+                    "action_mode_retained",
+                    "review_only retained; assignment/authorship alone does not grant write permission",
+                    reason,
+                )
             reaction_ok = self.react_eyes_for_job_contexts(job)
             self.queue.add_session_event(job.id, "dispatch_started", "OpenClaw agent dispatch started", f"reaction_ok={reaction_ok}")
             model_route = self.policy.model_route_for(job.repo, job.action, job.work_intent)

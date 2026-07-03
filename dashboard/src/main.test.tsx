@@ -341,6 +341,46 @@ describe("status badges", () => {
     expect(screen.getByText("medium")).toBeInTheDocument();
   });
 
+  it("shows intent classifier decisions in the job detail", () => {
+    render(
+      <JobDetail
+        job={{
+          ...job,
+          action_mode: "fix_allowed",
+          intent_classifier: {
+            enabled: true,
+            parser: { action: "reply_comment", work_intent: "review_only" },
+            llm: {
+              addressed_to_agent: true,
+              action: "reply_comment",
+              work_intent: "work_allowed",
+              write_permission: "state_change_allowed",
+              scope: "Update the PR tests.",
+              main_request: "Please fix the failing tests.",
+              confidence: 0.91,
+              reason: "The request asks the configured agent to modify repository state.",
+              applied: true,
+            },
+          },
+          worklog: [],
+        }}
+        session={undefined}
+        sessionEvents={[]}
+        transcript={[]}
+        now={Date.parse("2026-06-08T16:40:00Z")}
+      />,
+    );
+
+    expect(screen.getByText("Action mode")).toBeInTheDocument();
+    expect(screen.getByText("fix_allowed")).toBeInTheDocument();
+    expect(screen.getByText("state_change_allowed")).toBeInTheDocument();
+    expect(screen.getByText("reply_comment / review_only")).toBeInTheDocument();
+    expect(screen.getByText("reply_comment / work_allowed")).toBeInTheDocument();
+    expect(screen.getByText("Update the PR tests.")).toBeInTheDocument();
+    expect(screen.getByText("Please fix the failing tests.")).toBeInTheDocument();
+    expect(screen.getByText("91%")).toBeInTheDocument();
+  });
+
   it("returns from job detail through client-side dashboard navigation", async () => {
     const user = userEvent.setup();
     const onBackToDashboard = vi.fn();
