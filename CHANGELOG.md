@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.51.0 (2026-07-03)
+
+### Bug Fixes
+
+- Enforce PR action modes from intent
+  ([`c52e43e`](https://github.com/pilipilisbot/github-agent-bridge/commit/c52e43ee87e9d72dc74b5b1b1156a0e97a677200))
+
+### Features
+
+- Show PR action mode decisions in dashboard
+  ([`fa002b1`](https://github.com/pilipilisbot/github-agent-bridge/commit/fa002b1c7773e46064e23b1203527739e903e8d7))
+
+
 ## v0.50.0 (2026-06-26)
 
 
