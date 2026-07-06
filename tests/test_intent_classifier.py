@@ -147,7 +147,7 @@ def test_normalize_result_downgrades_unaddressed_events_to_archive():
     assert result.write_permission == "none"
 
 
-def test_normalize_result_requires_write_permission_for_work_allowed():
+def test_normalize_result_derives_write_permission_from_work_allowed():
     result = normalize_result(
         {
             "addressed_to_agent": True,
@@ -162,7 +162,11 @@ def test_normalize_result_requires_write_permission_for_work_allowed():
 
     assert result.applied is True
     assert result.action == "reply_comment"
-    assert result.work_intent == "review_only"
+    assert result.work_intent == "work_allowed"
+    assert result.write_permission == "state_change_allowed"
+    assert result.to_metadata()["normalization_warnings"] == [
+        "write_permission normalized to 'state_change_allowed' because work_intent is 'work_allowed'"
+    ]
 
 
 def test_classify_notification_with_llm_uses_isolated_session_id(monkeypatch):

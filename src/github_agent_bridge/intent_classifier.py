@@ -43,6 +43,7 @@ class IntentClassification:
     scope: str = ""
     main_request: str = ""
     subordinate_reason: str = ""
+    normalization_warnings: tuple[str, ...] = ()
 
     def to_metadata(self) -> dict[str, object]:
         metadata: dict[str, object] = {
@@ -60,6 +61,8 @@ class IntentClassification:
             metadata["main_request"] = self.main_request
         if self.subordinate_reason:
             metadata["subordinate_reason"] = self.subordinate_reason
+        if self.normalization_warnings:
+            metadata["normalization_warnings"] = list(self.normalization_warnings)
         return metadata
 
 
@@ -128,18 +131,24 @@ def _as_bool(value: Any) -> bool:
 
 
 def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentClassification:
+    normalization_warnings: list[str] = []
     action = str(result.get("action") or "").strip().lower()
     work_intent = str(result.get("work_intent") or result.get("intent") or "").strip().lower()
     addressed_to_agent = _as_bool(result.get("addressed_to_agent"))
     write_permission = str(result.get("write_permission") or "none").strip().lower()
     if write_permission not in ALLOWED_WRITE_PERMISSIONS:
+        normalization_warnings.append(f"invalid write_permission normalized from {write_permission!r} to 'none'")
         write_permission = "none"
     if not addressed_to_agent:
         action = "archive_notification"
         work_intent = "review_only"
         write_permission = "none"
     elif work_intent == "work_allowed" and write_permission != "state_change_allowed":
-        work_intent = "review_only"
+        normalization_warnings.append("write_permission normalized to 'state_change_allowed' because work_intent is 'work_allowed'")
+        write_permission = "state_change_allowed"
+    elif work_intent == "review_only" and write_permission != "none":
+        normalization_warnings.append("write_permission normalized to 'none' because work_intent is 'review_only'")
+        write_permission = "none"
     confidence = float(result.get("confidence") or 0)
     confidence = min(1.0, max(0.0, confidence))
     scope = compact(str(result.get("scope") or ""), 500)
@@ -158,6 +167,7 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
         scope=scope,
         main_request=main_request,
         subordinate_reason=subordinate_reason,
+        normalization_warnings=tuple(normalization_warnings),
     )
 
 
