@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.53.0 (2026-07-13)
+
+### Bug Fixes
+
+- Keep runtime usage on jobs dashboard
+  ([`fd3f3b7`](https://github.com/pilipilisbot/github-agent-bridge/commit/fd3f3b70268dbc810cc7147d029397d08067a06c))
+
+- Place runtime usage below monitor alerts
+  ([`4769158`](https://github.com/pilipilisbot/github-agent-bridge/commit/47691589343303b59fae96888ad1996cc052af31))
+
+### Features
+
+- Stack runtime usage by work mode
+  ([`bb1d61b`](https://github.com/pilipilisbot/github-agent-bridge/commit/bb1d61bc537d179b9d4eac41e4f3de8fae9bba3e))
+
+
 ## v0.52.0 (2026-07-13)
 
 ### Features
