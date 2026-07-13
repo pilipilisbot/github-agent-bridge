@@ -596,10 +596,12 @@ def test_dashboard_metrics_groups_runtime_usage_by_requested_timezone(tmp_path):
             "UPDATE jobs SET started_at=?, finished_at=? WHERE id=?",
             ("2026-06-01T23:30:00Z", "2026-06-02T00:30:00Z", first.id),
         )
+        con.execute("UPDATE jobs SET work_intent=? WHERE id=?", ("work_allowed", first.id))
         con.execute(
             "UPDATE jobs SET started_at=?, finished_at=? WHERE id=?",
             ("2026-06-02T10:00:00Z", "2026-06-02T10:30:00Z", second.id),
         )
+        con.execute("UPDATE jobs SET work_intent=? WHERE id=?", ("review_only", second.id))
         con.execute(
             "UPDATE jobs SET started_at=?, finished_at=NULL WHERE id=?",
             ("2026-06-02T11:00:00Z", missing_finish.id),
@@ -614,11 +616,38 @@ def test_dashboard_metrics_groups_runtime_usage_by_requested_timezone(tmp_path):
     payload = client.get("/api/metrics/summary", params={"timezone": "America/New_York"}).json()["metrics"]
 
     assert metrics["runtime_usage"]["day"] == [
-        {"bucket": "2026-06-01", "seconds": 3600, "minutes": 60.0, "jobs": 1},
-        {"bucket": "2026-06-02", "seconds": 1800, "minutes": 30.0, "jobs": 1},
+        {
+            "bucket": "2026-06-01",
+            "seconds": 3600,
+            "minutes": 60.0,
+            "jobs": 1,
+            "work_seconds": 3600,
+            "review_seconds": 0,
+            "work_jobs": 1,
+            "review_jobs": 0,
+        },
+        {
+            "bucket": "2026-06-02",
+            "seconds": 1800,
+            "minutes": 30.0,
+            "jobs": 1,
+            "work_seconds": 0,
+            "review_seconds": 1800,
+            "work_jobs": 0,
+            "review_jobs": 1,
+        },
     ]
     assert metrics["runtime_usage"]["month"] == [
-        {"bucket": "2026-06", "seconds": 5400, "minutes": 90.0, "jobs": 2},
+        {
+            "bucket": "2026-06",
+            "seconds": 5400,
+            "minutes": 90.0,
+            "jobs": 2,
+            "work_seconds": 3600,
+            "review_seconds": 1800,
+            "work_jobs": 1,
+            "review_jobs": 1,
+        },
     ]
     assert metrics["runtime_seconds"] == {"median": 1800, "p90": 3600, "p99": 3600}
     assert payload["runtime_usage"] == metrics["runtime_usage"]
