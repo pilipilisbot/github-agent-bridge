@@ -316,9 +316,37 @@ describe("status badges", () => {
     );
 
     expect(screen.getByRole("columnheader", { name: "Status" }).parentElement).toHaveClass("sticky", "top-0", "z-10");
+    expect(screen.getByRole("columnheader", { name: "Job" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Model" })).not.toBeInTheDocument();
     expect(screen.queryByText("openai/gpt-5.4-mini · medium")).not.toBeInTheDocument();
+    expect(screen.getAllByText("El dot del badge queda per sobre del header de la taula").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByLabelText("Work allowed: work_allowed").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps long desktop job titles in the flexible job column", () => {
+    const longSubject = "Improve the desktop dashboard table so a very long GitHub issue title stays readable without pushing status, actor, timing, updated, or action controls off the row";
+    render(
+      <JobsList
+        jobs={[
+          {
+            ...job,
+            id: 154,
+            thread: 154,
+            subject: longSubject,
+            action: "open_issue_with_an_unusually_long_action_name",
+          },
+        ]}
+        loading={false}
+        now={Date.parse("2026-05-31T19:12:00Z")}
+        onViewJob={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Job" })).toHaveClass("w-[42%]");
+    expect(screen.getAllByText(longSubject).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTitle(longSubject)).toHaveClass("line-clamp-2", "[overflow-wrap:anywhere]");
+    expect(screen.getByRole("columnheader", { name: "Timing" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Attempts" })).not.toBeInTheDocument();
   });
 
   it("shows review mode with an icon in the jobs list", () => {
