@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.52.0 (2026-07-13)
+
+### Features
+
+- Add dashboard action mode icons
+  ([`7ad465e`](https://github.com/pilipilisbot/github-agent-bridge/commit/7ad465e710f537f207f98e709b7034ca722444c6))
+
+
 ## v0.51.0 (2026-07-03)
 
 ### Bug Fixes
