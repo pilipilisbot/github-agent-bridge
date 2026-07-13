@@ -703,18 +703,25 @@ def runtime_usage(rows: list[sqlite3.Row], timezone: ZoneInfo) -> dict[str, list
         local = bucket_at.astimezone(timezone)
         day = local.date().isoformat()
         month = f"{local.year:04d}-{local.month:02d}"
-        add_runtime_bucket(daily, day, seconds)
-        add_runtime_bucket(monthly, month, seconds)
+        mode = runtime_usage_mode(row["work_intent"])
+        add_runtime_bucket(daily, day, seconds, mode)
+        add_runtime_bucket(monthly, month, seconds, mode)
     return {
         "day": runtime_bucket_rows(daily),
         "month": runtime_bucket_rows(monthly),
     }
 
 
-def add_runtime_bucket(buckets: dict[str, dict[str, int]], bucket: str, seconds: int) -> None:
-    current = buckets.setdefault(bucket, {"seconds": 0, "jobs": 0})
+def runtime_usage_mode(work_intent: str | None) -> str:
+    return "work" if work_intent == "work_allowed" else "review"
+
+
+def add_runtime_bucket(buckets: dict[str, dict[str, int]], bucket: str, seconds: int, mode: str) -> None:
+    current = buckets.setdefault(bucket, {"seconds": 0, "jobs": 0, "work_seconds": 0, "review_seconds": 0, "work_jobs": 0, "review_jobs": 0})
     current["seconds"] += seconds
     current["jobs"] += 1
+    current[f"{mode}_seconds"] += seconds
+    current[f"{mode}_jobs"] += 1
 
 
 def runtime_bucket_rows(buckets: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
@@ -724,6 +731,10 @@ def runtime_bucket_rows(buckets: dict[str, dict[str, int]]) -> list[dict[str, An
             "seconds": values["seconds"],
             "minutes": round(values["seconds"] / 60, 2),
             "jobs": values["jobs"],
+            "work_seconds": values["work_seconds"],
+            "review_seconds": values["review_seconds"],
+            "work_jobs": values["work_jobs"],
+            "review_jobs": values["review_jobs"],
         }
         for bucket, values in sorted(buckets.items())
     ]

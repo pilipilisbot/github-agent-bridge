@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowLeft, Bell, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, Eye, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, Wrench, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import "./styles.css";
@@ -33,6 +33,10 @@ type RuntimeUsageBucket = {
   seconds: number;
   minutes: number;
   jobs: number;
+  work_seconds: number;
+  review_seconds: number;
+  work_jobs: number;
+  review_jobs: number;
 };
 
 type Percentiles = {
@@ -3233,14 +3237,17 @@ function RuntimeUsageChart({ usage, loading, totalJobs }: { usage: RuntimeUsage 
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="label" minTickGap={16} tick={{ fontSize: 11 }} />
             <YAxis tickFormatter={(value) => formatRuntimeUsageSeconds(Number(value))} />
+            <Legend />
             <Tooltip
               formatter={(value, name) => {
-                if (name === "seconds") return [formatRuntimeUsageSeconds(Number(value)), "runtime"];
+                if (name === "Work") return [formatRuntimeUsageSeconds(Number(value)), "work"];
+                if (name === "Review") return [formatRuntimeUsageSeconds(Number(value)), "review"];
                 return [Number(value), String(name)];
               }}
               labelFormatter={(label) => String(label)}
             />
-            <Bar dataKey="seconds" fill="#0969da" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar dataKey="work_seconds" name="Work" stackId="runtime" fill="#0969da" isAnimationActive={false} />
+            <Bar dataKey="review_seconds" name="Review" stackId="runtime" fill="#8250df" radius={[4, 4, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
