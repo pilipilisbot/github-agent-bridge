@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, Bell, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Bell, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, Eye, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, Wrench, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
@@ -2669,7 +2669,7 @@ function JobsList({
                 </td>
                 <td className="px-2 py-3">
                   <div>{job.action}</div>
-                  <div className="text-xs text-muted">{job.intent}</div>
+                  <div className="mt-1"><ActionModeBadge intent={job.intent} actionMode={job.action_mode} display="intent" /></div>
                 </td>
                 <td className="px-2 py-3">
                   <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} />
@@ -2766,6 +2766,7 @@ function JobCard({
             <div className="line-clamp-2 text-sm leading-snug text-foreground">{job.subject}</div>
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
               <span>thread {job.thread ?? "n/a"} · {job.action}</span>
+              <ActionModeBadge intent={job.intent} actionMode={job.action_mode} compact display="intent" />
               <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} />
             </div>
           </div>
@@ -2911,6 +2912,35 @@ function ModelRoutePill({ route }: { route: JobModelRoute | null | undefined }) 
   );
 }
 
+function actionModeLabel(intent: string | null | undefined, actionMode?: string | null) {
+  const mode = actionMode || (intent === "work_allowed" ? "fix_allowed" : "review_only");
+  const isWork = mode === "fix_allowed" || (!actionMode && intent === "work_allowed");
+  if (isWork) return { mode, intentLabel: "work_allowed", title: "Work allowed" };
+  return { mode, intentLabel: "review_only", title: "Review only" };
+}
+
+function ActionModeBadge({ intent, actionMode, compact = false, display = "mode" }: { intent: string | null | undefined; actionMode?: string | null; compact?: boolean; display?: "mode" | "intent" }) {
+  const mode = actionModeLabel(intent, actionMode);
+  const Icon = mode.intentLabel === "work_allowed" ? Wrench : Eye;
+  const text = display === "intent" ? mode.intentLabel : mode.mode;
+  return (
+    <span
+      className={cn(
+        "inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs font-semibold",
+        mode.intentLabel === "work_allowed"
+          ? "border-blue-200 bg-blue-50 text-blue-700"
+          : "border-violet-200 bg-violet-50 text-violet-700",
+        compact && "min-h-5 px-1.5 text-[11px]",
+      )}
+      title={`${mode.title}: ${mode.mode}`}
+      aria-label={`${mode.title}: ${text}`}
+    >
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", compact && "h-3 w-3")} aria-hidden />
+      <span className="truncate font-mono">{text}</span>
+    </span>
+  );
+}
+
 function JobDetail({ job, session, sessionEvents, transcript, now, compact = false }: { job: Job; session: SessionCorrelation | undefined; sessionEvents: SessionEvent[] | undefined; transcript: TranscriptEntry[] | undefined; now: number; compact?: boolean }) {
   const shareHref = jobPath(job.id);
   const eventRows = sessionEvents ?? [];
@@ -3027,7 +3057,7 @@ function IntentClassifierPanel({ job, compact = false }: { job: Job; compact?: b
     <div className="grid gap-2">
       <h3 className="text-sm font-semibold">Action mode</h3>
       <div className={cn("grid gap-2 text-sm sm:gap-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-4")}>
-        <MiniStat label="Mode" value={job.action_mode ?? (job.intent === "work_allowed" ? "fix_allowed" : "review_only")} />
+        <MiniStat label="Mode" value={<ActionModeBadge intent={job.intent} actionMode={job.action_mode} />} />
         <MiniStat label="Intent" value={job.intent} />
         <MiniStat label="Addressed" value={classifier ? yesNo(llm.addressed_to_agent) : "n/a"} />
         <MiniStat label="Write" value={classifier ? llm.write_permission ?? "none" : job.intent === "work_allowed" ? "allowed" : "none"} />

@@ -318,6 +318,34 @@ describe("status badges", () => {
     expect(screen.getByRole("columnheader", { name: "Status" }).parentElement).toHaveClass("sticky", "top-0", "z-10");
     expect(screen.queryByRole("columnheader", { name: "Model" })).not.toBeInTheDocument();
     expect(screen.queryByText("openai/gpt-5.4-mini · medium")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Work allowed: work_allowed").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows review mode with an icon in the jobs list", () => {
+    render(
+      <JobsList
+        jobs={[{ ...job, intent: "review_only", action_mode: "review_only" }]}
+        loading={false}
+        now={Date.parse("2026-05-31T19:12:00Z")}
+        onViewJob={() => undefined}
+      />,
+    );
+
+    expect(screen.getAllByLabelText("Review only: review_only").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("uses the action mode for the visual state when it differs from the stored intent", () => {
+    render(
+      <JobDetail
+        job={{ ...job, intent: "work_allowed", action_mode: "review_only", worklog: [] }}
+        session={undefined}
+        sessionEvents={[]}
+        transcript={[]}
+        now={Date.parse("2026-06-08T16:40:00Z")}
+      />,
+    );
+
+    expect(screen.getByLabelText("Review only: review_only")).toBeInTheDocument();
   });
 
   it("shows GitHub links at the top of the job detail", () => {
@@ -337,6 +365,7 @@ describe("status badges", () => {
     const content = container.textContent ?? "";
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Queue wait"));
     expect(content.indexOf("GitHub links")).toBeLessThan(content.indexOf("Timeline"));
+    expect(screen.getByLabelText("Work allowed: fix_allowed")).toBeInTheDocument();
     expect(screen.getByText("Reasoning")).toBeInTheDocument();
     expect(screen.getByText("medium")).toBeInTheDocument();
   });
