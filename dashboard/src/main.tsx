@@ -1101,14 +1101,10 @@ function App() {
             alerts={alerts.data?.alerts}
             alertsLoading={alerts.isLoading}
             alertsError={alerts.error}
-            runtimeUsage={metrics.data?.metrics.runtime_usage}
-            runtimeUsageLoading={metrics.isLoading}
-            totalJobs={totalJobs(counts)}
             now={now}
             onRefreshProcesses={() => processes.refetch()}
             onRefreshSystemd={() => systemd.refetch()}
             onRefreshAlerts={() => alerts.refetch()}
-            onRefreshRuntimeUsage={() => metrics.refetch()}
           />
         ) : (
           <>
@@ -1147,6 +1143,9 @@ function App() {
                   onRetry={retryJob}
                   onDismiss={dismissJob}
                 />
+              </Panel>
+              <Panel title="Runtime usage" action={<RefreshButton onClick={() => metrics.refetch()} />}>
+                <RuntimeUsageChart usage={metrics.data?.metrics.runtime_usage} loading={metrics.isLoading} totalJobs={totalJobs(counts)} />
               </Panel>
             </section>
 
@@ -1418,14 +1417,10 @@ function SystemPage({
   alerts,
   alertsLoading,
   alertsError,
-  runtimeUsage,
-  runtimeUsageLoading,
-  totalJobs,
   now,
   onRefreshProcesses,
   onRefreshSystemd,
   onRefreshAlerts,
-  onRefreshRuntimeUsage,
 }: {
   processes: ProcessesResponse | undefined;
   processesLoading: boolean;
@@ -1436,14 +1431,10 @@ function SystemPage({
   alerts: AlertRecord[] | undefined;
   alertsLoading: boolean;
   alertsError: Error | null;
-  runtimeUsage: RuntimeUsage | undefined;
-  runtimeUsageLoading: boolean;
-  totalJobs: number;
   now: number;
   onRefreshProcesses: () => void;
   onRefreshSystemd: () => void;
   onRefreshAlerts: () => void;
-  onRefreshRuntimeUsage: () => void;
 }) {
   return (
     <section className="grid gap-4" aria-label="Bridge system">
@@ -1458,9 +1449,6 @@ function SystemPage({
       <Panel title="Monitor alerts" action={<RefreshButton onClick={onRefreshAlerts} />}>
         {alertsError ? <Banner tone="error" text={alertsError.message} /> : null}
         <AlertsPanel alerts={alerts} loading={alertsLoading} now={now} />
-      </Panel>
-      <Panel title="Runtime usage" action={<RefreshButton onClick={onRefreshRuntimeUsage} />}>
-        <RuntimeUsageChart usage={runtimeUsage} loading={runtimeUsageLoading} totalJobs={totalJobs} />
       </Panel>
     </section>
   );
