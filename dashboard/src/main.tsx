@@ -2641,60 +2641,114 @@ function JobsList({
         <MobileLoadMoreJobs hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
       </div>
       <div className="hidden max-h-[640px] overflow-auto rounded-md border border-border md:block">
-        <table className="min-w-full border-collapse text-sm">
+        <table className="min-w-[1080px] table-fixed border-collapse text-sm">
           <thead>
             <tr className="sticky top-0 z-10 border-b border-border bg-panel text-left text-xs text-muted">
-              <th className="px-2 py-2 font-semibold">ID</th>
-              <th className="px-2 py-2 font-semibold">Status</th>
-              <th className="px-2 py-2 font-semibold">Repo / thread</th>
-              <th className="px-2 py-2 font-semibold">Action</th>
-              <th className="px-2 py-2 font-semibold">Actor</th>
-              <th className="px-2 py-2 font-semibold">Attempts</th>
-              <th className="px-2 py-2 font-semibold">Queue wait</th>
-              <th className="px-2 py-2 font-semibold">Runtime</th>
-              <th className="px-2 py-2 font-semibold">Updated</th>
-              <th className="px-2 py-2 text-right font-semibold">Actions</th>
+              <th className="w-[42%] px-3 py-2 font-semibold">Job</th>
+              <th className="w-32 px-3 py-2 font-semibold">Status</th>
+              <th className="w-40 px-3 py-2 font-semibold">Action</th>
+              <th className="w-36 px-3 py-2 font-semibold">Actor</th>
+              <th className="w-36 px-3 py-2 font-semibold">Timing</th>
+              <th className="w-28 px-3 py-2 font-semibold">Updated</th>
+              <th className="w-24 px-3 py-2 text-right font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
             {jobs.map((job) => (
-              <tr
+              <DesktopJobRow
                 key={job.id}
-                className="cursor-pointer border-b border-border hover:bg-slate-50"
-                onClick={() => onViewJob(job.id)}
-              >
-                <td className="px-2 py-3 font-mono">#{job.id}</td>
-                <td className="px-2 py-3">
-                  <StatusBadge status={job.status} />
-                </td>
-                <td className="px-2 py-3">
-                  <div className="font-mono">{job.repo ?? job.work_key}</div>
-                  <div className="text-xs text-muted">thread {job.thread ?? "n/a"}</div>
-                </td>
-                <td className="px-2 py-3">
-                  <div>{job.action}</div>
-                  <div className="mt-1"><ActionModeBadge intent={job.intent} actionMode={job.action_mode} display="intent" /></div>
-                </td>
-                <td className="px-2 py-3">
-                  <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} />
-                </td>
-                <td className="px-2 py-3">{job.attempts}</td>
-                <td className="px-2 py-3">{formatSeconds(queueWaitSeconds(job, now))}</td>
-                <td className="px-2 py-3">{formatSeconds(jobRuntimeSeconds(job, now))}</td>
-                <td className="px-2 py-3 font-mono text-xs"><TimeText value={job.updated_at} compact relative now={now} /></td>
-                <td className="px-2 py-3 text-right">
-                  <div className="inline-flex items-center gap-1">
-                    <RetryJobButton jobId={job.id} canRetry={canRetryFromList && isRetryableStatus(job.status)} retrying={retryingJobId === job.id} onRetry={retryJobFromList} compact />
-                    <DismissJobButton jobId={job.id} canDismiss={canDismissFromList && isRetryableStatus(job.status)} dismissing={dismissingJobId === job.id} onDismiss={dismissJobFromList} compact />
-                  </div>
-                </td>
-              </tr>
+                job={job}
+                now={now}
+                onViewJob={onViewJob}
+                canRetry={canRetryFromList && isRetryableStatus(job.status)}
+                retrying={retryingJobId === job.id}
+                onRetry={retryJobFromList}
+                canDismiss={canDismissFromList && isRetryableStatus(job.status)}
+                dismissing={dismissingJobId === job.id}
+                onDismiss={dismissJobFromList}
+              />
             ))}
           </tbody>
         </table>
         <JobsLoadSentinel hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
       </div>
     </>
+  );
+}
+
+function DesktopJobRow({
+  job,
+  now,
+  onViewJob,
+  canRetry,
+  retrying,
+  onRetry,
+  canDismiss,
+  dismissing,
+  onDismiss,
+}: {
+  job: Job;
+  now: number;
+  onViewJob: (id: number) => void;
+  canRetry: boolean;
+  retrying: boolean;
+  onRetry: (jobId: number) => Promise<void>;
+  canDismiss: boolean;
+  dismissing: boolean;
+  onDismiss: (jobId: number) => Promise<void>;
+}) {
+  return (
+    <tr className="cursor-pointer border-b border-border align-top hover:bg-slate-50" onClick={() => onViewJob(job.id)}>
+      <td className="min-w-0 px-3 py-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="mt-0.5 shrink-0 font-mono text-xs font-semibold text-muted">#{job.id}</span>
+          <div className="min-w-0 space-y-1">
+            <div className="line-clamp-2 text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]" title={job.subject}>
+              {job.subject}
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+              <span className="min-w-0 max-w-full truncate font-mono">{job.repo ?? job.work_key}</span>
+              <span className="shrink-0">thread {job.thread ?? "n/a"}</span>
+            </div>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-3">
+        <StatusBadge status={job.status} />
+      </td>
+      <td className="px-3 py-3">
+        <div className="min-w-0 truncate text-sm text-foreground" title={job.action}>{job.action}</div>
+        <div className="mt-1">
+          <ActionModeBadge intent={job.intent} actionMode={job.action_mode} display="intent" compact />
+        </div>
+      </td>
+      <td className="px-3 py-3">
+        <ActorLabel actor={job.trigger_actor} avatarUrl={job.trigger_actor_avatar_url} />
+      </td>
+      <td className="px-3 py-3 text-xs text-muted">
+        <div className="flex items-center justify-between gap-2">
+          <span>wait</span>
+          <span className="font-mono text-foreground">{formatSeconds(queueWaitSeconds(job, now))}</span>
+        </div>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <span>run</span>
+          <span className="font-mono text-foreground">{formatSeconds(jobRuntimeSeconds(job, now))}</span>
+        </div>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <span>tries</span>
+          <span className="font-mono text-foreground">{job.attempts}</span>
+        </div>
+      </td>
+      <td className="px-3 py-3 font-mono text-xs">
+        <TimeText value={job.updated_at} compact relative now={now} />
+      </td>
+      <td className="px-3 py-3 text-right">
+        <div className="inline-flex items-center gap-1">
+          <RetryJobButton jobId={job.id} canRetry={canRetry} retrying={retrying} onRetry={onRetry} compact />
+          <DismissJobButton jobId={job.id} canDismiss={canDismiss} dismissing={dismissing} onDismiss={onDismiss} compact />
+        </div>
+      </td>
+    </tr>
   );
 }
 
