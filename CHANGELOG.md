@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.54.0 (2026-07-14)
+
+### Features
+
+- Improve desktop jobs table layout
+  ([`e8b5068`](https://github.com/pilipilisbot/github-agent-bridge/commit/e8b5068e45c3af84eaab906037421a8d7341cd5e))
+
+
 ## v0.53.0 (2026-07-13)
 
 ### Bug Fixes
