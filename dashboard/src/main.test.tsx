@@ -1056,7 +1056,7 @@ describe("knowledge proposals", () => {
     expect(screen.getByText("pilipilisbot/github-agent-bridge/issues/73#issuecomment-1")).toBeInTheDocument();
   });
 
-  it("lets admins edit curated rule scope only after entering edit mode", async () => {
+  it("lets manageable curated rules edit scope only after entering edit mode", async () => {
     const user = userEvent.setup();
     const onUpdateRuleScope = vi.fn().mockResolvedValue(undefined);
     const rules = [
@@ -1071,6 +1071,7 @@ describe("knowledge proposals", () => {
         created_at: "2026-06-04T10:00:00Z",
         last_seen: "2026-06-04T10:01:00Z",
         source_event_details: [],
+        can_manage: false,
       },
     ];
 
@@ -1078,7 +1079,6 @@ describe("knowledge proposals", () => {
       <KnowledgeRules
         rules={rules}
         loading={false}
-        isAdmin={false}
         now={Date.parse("2026-06-04T10:02:00Z")}
         onUpdateRuleScope={onUpdateRuleScope}
         onDeleteRule={vi.fn()}
@@ -1089,9 +1089,8 @@ describe("knowledge proposals", () => {
 
     rerender(
       <KnowledgeRules
-        rules={rules}
+        rules={[{ ...rules[0], can_manage: true }]}
         loading={false}
-        isAdmin={true}
         now={Date.parse("2026-06-04T10:02:00Z")}
         onUpdateRuleScope={onUpdateRuleScope}
         onDeleteRule={vi.fn()}
@@ -1123,10 +1122,10 @@ describe("knowledge proposals", () => {
             created_at: "2026-06-04T10:00:00Z",
             last_seen: "2026-06-04T10:01:00Z",
             source_event_details: [],
+            can_manage: true,
           },
         ]}
         loading={false}
-        isAdmin={true}
         now={Date.parse("2026-06-04T10:02:00Z")}
         onUpdateRuleScope={onUpdateRuleScope}
         onDeleteRule={vi.fn()}
