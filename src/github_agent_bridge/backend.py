@@ -87,29 +87,11 @@ def _knowledge_item_owned_by(item: dict[str, Any], login: str) -> bool:
     return False
 
 
-def _filter_user_knowledge(items: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
-    if profile.get("is_admin"):
-        return items
-    login = str(profile.get("login") or "")
-    return [item for item in items if _knowledge_item_owned_by(item, login)]
-
-
 def _mark_manageable_knowledge(items: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
     if profile.get("is_admin"):
         return [{**item, "can_manage": True} for item in items]
     login = str(profile.get("login") or "")
     return [{**item, "can_manage": _knowledge_item_owned_by(item, login)} for item in items]
-
-
-def _repositories_from_knowledge(items: list[dict[str, Any]]) -> list[str]:
-    repos: set[str] = set()
-    for item in items:
-        scope = str(item.get("scope") or "")
-        if scope.startswith("repo:"):
-            repo = scope.removeprefix("repo:").strip()
-            if repo:
-                repos.add(repo)
-    return sorted(repos)
 
 
 class DashboardConfig:
@@ -807,11 +789,11 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             proposals = [item for item in proposals if item["scope"] == scope or item["scope"].startswith(f"{scope}:")]
         events = list_events(config.db, scope=scope, limit=limit)
         rules = list_applicable_rules(config.db, repo.strip().lower(), min_confidence=0) if scope else list_rules(config.db, min_confidence=0)
-        proposals = _mark_manageable_knowledge(_filter_user_knowledge(proposals, profile), profile)
-        events = _mark_manageable_knowledge(_filter_user_knowledge(events, profile), profile)
-        rules = _mark_manageable_knowledge(_filter_user_knowledge(rules, profile), profile)
+        proposals = _mark_manageable_knowledge(proposals, profile)
+        events = _mark_manageable_knowledge(events, profile)
+        rules = _mark_manageable_knowledge(rules, profile)
         return {
-            "repositories": list_repositories(config.db) if profile.get("is_admin") else _repositories_from_knowledge([*events, *proposals, *rules]),
+            "repositories": list_repositories(config.db),
             "events": events,
             "proposals": proposals,
             "rules": rules,

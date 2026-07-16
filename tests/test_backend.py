@@ -1014,7 +1014,7 @@ def test_dashboard_admin_can_change_knowledge_rule_scope(tmp_path):
     assert invalid.status_code == 400
 
 
-def test_dashboard_user_only_sees_own_knowledge(tmp_path):
+def test_dashboard_user_sees_all_knowledge_and_can_manage_owned_records(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     JobQueue(db)
     feedback.capture_feedback(
@@ -1045,10 +1045,9 @@ def test_dashboard_user_only_sees_own_knowledge(tmp_path):
 
     listing = client.get("/api/knowledge").json()
 
-    assert listing["repositories"] == ["gisce/erp"]
-    assert [event["trigger_actor"] for event in listing["events"]] == ["alice"]
-    assert [rule["rule"] for rule in listing["rules"]] == ["Alice owned rule."]
-    assert listing["rules"][0]["can_manage"] is True
+    assert listing["repositories"] == ["gisce/erp", "other/project"]
+    assert {event["trigger_actor"]: event["can_manage"] for event in listing["events"]} == {"alice": True, "bob": False}
+    assert {rule["rule"]: rule["can_manage"] for rule in listing["rules"]} == {"Alice owned rule.": True, "Bob owned rule.": False}
 
 
 def test_dashboard_user_can_manage_only_owned_knowledge_rules(tmp_path):
