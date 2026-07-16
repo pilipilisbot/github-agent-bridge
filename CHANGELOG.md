@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.55.0 (2026-07-16)
+
+### Bug Fixes
+
+- Let users view all knowledge
+  ([`52f89f6`](https://github.com/pilipilisbot/github-agent-bridge/commit/52f89f66eecba9f6cee4b95848aa80f19fa2291d))
+
+### Features
+
+- Allow users to manage owned knowledge
+  ([`caf69e2`](https://github.com/pilipilisbot/github-agent-bridge/commit/caf69e23f22ec92401fee688100e1b63a98f1a11))
+
+
 ## v0.54.0 (2026-07-14)
 
 ### Features
