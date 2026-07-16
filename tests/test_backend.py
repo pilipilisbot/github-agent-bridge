@@ -955,6 +955,7 @@ def test_dashboard_knowledge_lists_and_admin_moderates_feedback(tmp_path):
         "reply_comment",
         "auto_trusted",
         "review_only",
+        trigger_actor="alice",
     )
     event = feedback.list_events(db, "repo:gisce/erp")[0]
     proposal = feedback.store_proposal(
@@ -1011,6 +1012,86 @@ def test_dashboard_admin_can_change_knowledge_rule_scope(tmp_path):
     assert client.get("/api/knowledge").json()["rules"][0]["scope"] == "global"
     assert client.get("/api/knowledge", params={"repo": "gisce/erp"}).json()["rules"][0]["scope"] == "global"
     assert invalid.status_code == 400
+
+
+def test_dashboard_user_only_sees_own_knowledge(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(
+        db,
+        notif(mid="<alice@github.com>"),
+        GitHubContext(["https://github.com/gisce/erp/pull/1#issuecomment-10"], "gisce/erp", 1, comment_id=10),
+        "reply_comment",
+        "auto_trusted",
+        "review_only",
+        trigger_actor="alice",
+    )
+    feedback.capture_feedback(
+        db,
+        notif(mid="<bob@github.com>"),
+        GitHubContext(["https://github.com/other/project/issues/2#issuecomment-20"], "other/project", 2, comment_id=20),
+        "reply_comment",
+        "auto_trusted",
+        "review_only",
+        trigger_actor="bob",
+    )
+    alice_event = feedback.list_events(db, "repo:gisce/erp")[0]
+    bob_event = feedback.list_events(db, "repo:other/project")[0]
+    feedback.add_rule(db, "repo:gisce/erp", "operating_rule", "Alice owned rule.", 0.8, [alice_event["id"]])
+    feedback.add_rule(db, "repo:other/project", "operating_rule", "Bob owned rule.", 0.8, [bob_event["id"]])
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice", "bob"}, admin_users={"admin"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
+
+    listing = client.get("/api/knowledge").json()
+
+    assert listing["repositories"] == ["gisce/erp"]
+    assert [event["trigger_actor"] for event in listing["events"]] == ["alice"]
+    assert [rule["rule"] for rule in listing["rules"]] == ["Alice owned rule."]
+    assert listing["rules"][0]["can_manage"] is True
+
+
+def test_dashboard_user_can_manage_only_owned_knowledge_rules(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(
+        db,
+        notif(mid="<alice@github.com>"),
+        GitHubContext(["https://github.com/gisce/erp/pull/1#issuecomment-10"], "gisce/erp", 1, comment_id=10),
+        "reply_comment",
+        "auto_trusted",
+        "review_only",
+        trigger_actor="alice",
+    )
+    feedback.capture_feedback(
+        db,
+        notif(mid="<bob@github.com>"),
+        GitHubContext(["https://github.com/gisce/erp/pull/2#issuecomment-20"], "gisce/erp", 2, comment_id=20),
+        "reply_comment",
+        "auto_trusted",
+        "review_only",
+        trigger_actor="bob",
+    )
+    events = feedback.list_events(db, "repo:gisce/erp", limit=2)
+    alice_event = next(event for event in events if event["trigger_actor"] == "alice")
+    bob_event = next(event for event in events if event["trigger_actor"] == "bob")
+    alice_rule = feedback.add_rule(db, "repo:gisce/erp", "operating_rule", "Alice owned rule.", 0.8, [alice_event["id"]])
+    bob_rule = feedback.add_rule(db, "repo:gisce/erp", "operating_rule", "Bob owned rule.", 0.8, [bob_event["id"]])
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice"}, admin_users={"admin"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
+
+    updated = client.patch(f"/api/knowledge/rules/{alice_rule['id']}", json={"scope": "org:gisce"})
+    forbidden_update = client.patch(f"/api/knowledge/rules/{bob_rule['id']}", json={"scope": "org:gisce"})
+    forbidden_delete = client.delete(f"/api/knowledge/rules/{bob_rule['id']}")
+    deleted = client.delete(f"/api/knowledge/rules/{updated.json()['rule']['id']}")
+
+    assert updated.status_code == 200
+    assert updated.json()["rule"]["scope"] == "org:gisce"
+    assert updated.json()["rule"]["can_manage"] is True
+    assert forbidden_update.status_code == 403
+    assert forbidden_delete.status_code == 403
+    assert deleted.status_code == 200
 
 
 def test_dashboard_admin_manages_mcp_tokens(tmp_path):

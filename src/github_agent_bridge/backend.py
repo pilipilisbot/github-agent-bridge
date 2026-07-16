@@ -66,6 +66,52 @@ PROJECT_REPOSITORY_URL = "https://github.com/pilipilisbot/github-agent-bridge"
 SESSION_VERSION = 1
 
 
+def _knowledge_actor(item: dict[str, Any]) -> str:
+    actor = item.get("trigger_actor") or (item.get("actor") if item.get("actor") != "github" else "")
+    return str(actor or "").strip().lower()
+
+
+def _knowledge_item_owned_by(item: dict[str, Any], login: str) -> bool:
+    user = str(login or "").strip().lower()
+    if not user:
+        return False
+    actor = _knowledge_actor(item)
+    if actor == user:
+        return True
+    source_event = item.get("source_event")
+    if isinstance(source_event, dict) and _knowledge_item_owned_by(source_event, user):
+        return True
+    source_events = item.get("source_event_details")
+    if isinstance(source_events, list):
+        return any(isinstance(event, dict) and _knowledge_item_owned_by(event, user) for event in source_events)
+    return False
+
+
+def _filter_user_knowledge(items: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
+    if profile.get("is_admin"):
+        return items
+    login = str(profile.get("login") or "")
+    return [item for item in items if _knowledge_item_owned_by(item, login)]
+
+
+def _mark_manageable_knowledge(items: list[dict[str, Any]], profile: dict[str, Any]) -> list[dict[str, Any]]:
+    if profile.get("is_admin"):
+        return [{**item, "can_manage": True} for item in items]
+    login = str(profile.get("login") or "")
+    return [{**item, "can_manage": _knowledge_item_owned_by(item, login)} for item in items]
+
+
+def _repositories_from_knowledge(items: list[dict[str, Any]]) -> list[str]:
+    repos: set[str] = set()
+    for item in items:
+        scope = str(item.get("scope") or "")
+        if scope.startswith("repo:"):
+            repo = scope.removeprefix("repo:").strip()
+            if repo:
+                repos.add(repo)
+    return sorted(repos)
+
+
 class DashboardConfig:
     def __init__(
         self,
@@ -749,7 +795,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
 
     @app.get("/api/knowledge")
     def api_knowledge(
-        _: str = Depends(current_user),
+        profile: dict[str, Any] = Depends(current_profile),
         repo: str | None = None,
         proposal_status: str | None = Query(default=None, alias="status"),
         limit: int = 50,
@@ -761,8 +807,11 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             proposals = [item for item in proposals if item["scope"] == scope or item["scope"].startswith(f"{scope}:")]
         events = list_events(config.db, scope=scope, limit=limit)
         rules = list_applicable_rules(config.db, repo.strip().lower(), min_confidence=0) if scope else list_rules(config.db, min_confidence=0)
+        proposals = _mark_manageable_knowledge(_filter_user_knowledge(proposals, profile), profile)
+        events = _mark_manageable_knowledge(_filter_user_knowledge(events, profile), profile)
+        rules = _mark_manageable_knowledge(_filter_user_knowledge(rules, profile), profile)
         return {
-            "repositories": list_repositories(config.db),
+            "repositories": list_repositories(config.db) if profile.get("is_admin") else _repositories_from_knowledge([*events, *proposals, *rules]),
             "events": events,
             "proposals": proposals,
             "rules": rules,
@@ -791,20 +840,30 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         return {"proposal": proposal, "detail": "knowledge_proposal_rejected"}
 
     @app.delete("/api/knowledge/rules/{rule_id}")
-    def api_knowledge_rule_delete(rule_id: str, _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+    def api_knowledge_rule_delete(rule_id: str, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        rule = next((item for item in list_rules(config.db, min_confidence=0) if item["id"] == rule_id), None)
+        if rule is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
+        if not profile.get("is_admin") and not _knowledge_item_owned_by(rule, str(profile.get("login") or "")):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="knowledge_rule_owner_required")
         if not delete_rule(config.db, rule_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
         return {"detail": "knowledge_rule_deleted"}
 
     @app.patch("/api/knowledge/rules/{rule_id}")
-    def api_knowledge_rule_update(rule_id: str, payload: dict[str, Any], _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+    def api_knowledge_rule_update(rule_id: str, payload: dict[str, Any], profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        existing = next((item for item in list_rules(config.db, min_confidence=0) if item["id"] == rule_id), None)
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
+        if not profile.get("is_admin") and not _knowledge_item_owned_by(existing, str(profile.get("login") or "")):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="knowledge_rule_owner_required")
         try:
             rule = update_rule_scope(config.db, rule_id, str(payload.get("scope") or ""))
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         if rule is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="knowledge_rule_not_found")
-        return {"rule": rule, "detail": "knowledge_rule_updated"}
+        return {"rule": {**rule, "can_manage": True}, "detail": "knowledge_rule_updated"}
 
     @app.get("/api/mcp/tokens")
     def api_mcp_tokens(_: dict[str, Any] = Depends(current_admin_profile), include_revoked: bool = False) -> dict[str, Any]:

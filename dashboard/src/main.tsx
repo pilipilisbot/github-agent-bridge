@@ -350,6 +350,7 @@ type KnowledgeProposal = {
   model: string;
   error: string | null;
   source_event: KnowledgeEvent | null;
+  can_manage?: boolean;
 };
 
 type KnowledgeRule = {
@@ -363,6 +364,7 @@ type KnowledgeRule = {
   source_events: string[];
   source_event_details: KnowledgeEvent[];
   observations: number;
+  can_manage?: boolean;
 };
 
 type KnowledgeEvent = {
@@ -384,6 +386,7 @@ type KnowledgeEvent = {
   classification: string;
   confidence: number;
   memorable: boolean;
+  can_manage?: boolean;
 };
 
 type KnowledgeResponse = {
@@ -1689,7 +1692,7 @@ function KnowledgePage({
         }
       >
         {activeTab === "proposals" ? <KnowledgeProposals proposals={data?.proposals ?? []} loading={loading} isAdmin={Boolean(user?.is_admin)} now={now} onApprove={onApprove} onReject={onReject} /> : null}
-        {activeTab === "rules" ? <KnowledgeRules rules={data?.rules ?? []} loading={loading} isAdmin={Boolean(user?.is_admin)} now={now} onUpdateRuleScope={onUpdateRuleScope} onDeleteRule={onDeleteRule} /> : null}
+        {activeTab === "rules" ? <KnowledgeRules rules={data?.rules ?? []} loading={loading} now={now} onUpdateRuleScope={onUpdateRuleScope} onDeleteRule={onDeleteRule} /> : null}
         {activeTab === "events" ? <KnowledgeEvents events={data?.events ?? []} loading={loading} now={now} /> : null}
       </Panel>
     </div>
@@ -1800,14 +1803,12 @@ function knowledgeRuleScopeOptions(scope: string) {
 function KnowledgeRules({
   rules,
   loading,
-  isAdmin,
   now,
   onUpdateRuleScope,
   onDeleteRule,
 }: {
   rules: KnowledgeRule[];
   loading: boolean;
-  isAdmin: boolean;
   now: number;
   onUpdateRuleScope: (ruleId: string, scope: string) => Promise<void>;
   onDeleteRule: (ruleId: string) => Promise<void>;
@@ -1827,11 +1828,12 @@ function KnowledgeRules({
         const scopeOptions = knowledgeRuleScopeOptions(rule.scope);
         const isEditing = editingId === rule.id;
         const isBusy = busyId === rule.id;
+        const canManage = Boolean(rule.can_manage);
         return (
           <article key={rule.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-white p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <KnowledgeRowHeader scope={rule.scope} type={rule.type} confidence={rule.confidence} status={`${rule.observations} observation${rule.observations === 1 ? "" : "s"}`} timestamp={rule.last_seen} now={now} />
-              {isAdmin ? (
+              {canManage ? (
                 <div className="flex flex-wrap items-end gap-2">
                   {isEditing ? (
                     <>
