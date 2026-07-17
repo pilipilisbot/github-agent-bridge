@@ -181,6 +181,19 @@ gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
   run --mode live --workers 2
 ```
 
+To dedicate an executor to a specific class of work, add `--work-intent`.
+For example, keep lightweight review/comment jobs moving with:
+
+```bash
+gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
+  --policy ~/.config/github-agent-bridge/policy.json \
+  run --mode live --workers 2 --work-intent review_only
+```
+
+Use `--work-intent work_allowed` for implementation-only capacity, or omit the
+flag for a general pool. The queue still prevents concurrent jobs for the same
+GitHub issue/PR even when multiple pools are running.
+
 Run the reader separately. Add `--mark-seen` only when the bridge should consume GitHub notifications from the configured mailbox:
 
 ```bash

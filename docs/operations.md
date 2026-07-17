@@ -31,6 +31,44 @@ gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
   run --mode live --workers 4 --review-timeout 900 --work-timeout 3600
 ```
 
+Intent-specific executor pool:
+
+```bash
+gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 \
+  --policy ~/.config/github-agent-bridge/policy.json \
+  run --mode live --workers 2 --work-intent review_only --review-timeout 900
+```
+
+Use `--work-intent` when an operator wants separate worker capacity for cheap
+review/comment follow-ups and heavier implementation jobs. Allowed values are
+`review_only`, `work_allowed`, and `all`; the flag may be repeated or
+comma-separated. Omitting it or passing `all` keeps the default all-intents
+executor behavior.
+
+A common production topology is:
+
+| Pool | Example command | Purpose |
+| --- | --- | --- |
+| General | `gab ... run --mode live --workers 2` | Claims any pending job. Keeps the system simple when the queue is small. |
+| Review-only | `gab ... run --mode live --workers 2 --work-intent review_only` | Keeps replies, reviews, and analysis moving even when implementation work is backed up. |
+| Work-only | `gab ... run --mode live --workers 1 --work-intent work_allowed` | Caps concurrent state-changing work so long-running edits do not consume all executor slots. |
+
+Intent filters apply only while claiming pending jobs. The queue still enforces
+the per-`work_key` guard, so two pools cannot run two jobs for the same
+issue/PR/thread concurrently. If every running executor is filtered to
+`review_only`, `work_allowed` jobs remain pending until a general or work-only
+executor is available; `gab monitor` will report old pending jobs normally.
+
+For systemd installs, set `GITHUB_AGENT_BRIDGE_WORK_INTENT` in the private env
+file read by the service:
+
+```bash
+# ~/.config/github-agent-bridge/env
+GITHUB_AGENT_BRIDGE_MODE=live
+GITHUB_AGENT_BRIDGE_WORKERS=2
+GITHUB_AGENT_BRIDGE_WORK_INTENT=review_only
+```
+
 Reader timer job:
 
 ```bash
