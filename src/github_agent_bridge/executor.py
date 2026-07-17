@@ -40,6 +40,7 @@ class ExecutorConfig:
     workers: int = 4
     idle_sleep_seconds: float = 1.0
     run_once: bool = False
+    work_intents: frozenset[str] | None = None
     missing_followup_retries: int = 1
     transient_dispatch_retries: int = 2
 
@@ -55,7 +56,7 @@ class ExecutorPool:
 
     def work_one(self, worker_id: str | None = None) -> bool:
         worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
-        job = self.queue.claim_next(worker_id)
+        job = self.queue.claim_next(worker_id, self.config.work_intents)
         if not job:
             return False
         dispatched = False
