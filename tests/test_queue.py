@@ -198,6 +198,33 @@ def test_claim_parallel_different_work_keys_but_not_same(tmp_path):
     assert q.claim_next("w3") is None
 
 
+def test_claim_can_filter_by_work_intent(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    work_job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    review_job, _ = q.enqueue(notif(3, "<3@github.com>", BODY_OTHER), policy())
+    q.update_work_intent(work_job.id, "work_allowed", "explicit implementation request")
+    q.update_work_intent(review_job.id, "review_only", "review-only request")
+
+    claimed = q.claim_next("review-worker", {"review_only"})
+
+    assert claimed.id == review_job.id
+    assert claimed.work_intent == "review_only"
+
+
+def test_claim_filter_preserves_running_work_key_guard(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+
+    running = q.claim_next("all-worker")
+    followup_job, state = q.enqueue(notif(2, "<2@github.com>", BODY2), policy())
+
+    assert running.work_key == "gisce/erp#1"
+    assert state == "enqueued"
+    assert followup_job.work_key == running.work_key
+    assert q.claim_next("review-worker", {"review_only"}) is None
+    assert q.claim_next("review-worker", set()) is None
+
+
 def test_enqueue_does_not_coalesce_into_running_job(tmp_path):
     q = JobQueue(tmp_path / "q.sqlite3")
     job1, state1 = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())

@@ -148,6 +148,7 @@ def cmd_read_imap_once(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     q = JobQueue(args.db); policy = load_policy(args.policy)
     mode = RunMode(args.mode)
+    work_intents = parse_work_intents(args.work_intent)
     dispatcher = OpenClawDispatcher(
         args.openclaw_bin,
         args.node_bin,
@@ -160,9 +161,36 @@ def cmd_run(args: argparse.Namespace) -> int:
         cli_grace_seconds=args.cli_grace,
         feedback_db_path=args.db,
     )
-    pool = ExecutorPool(q, policy, dispatcher, GitHubClient(args.gh_bin, mode=mode), ExecutorConfig(args.workers, args.idle_sleep, args.once))
+    pool = ExecutorPool(
+        q,
+        policy,
+        dispatcher,
+        GitHubClient(args.gh_bin, mode=mode),
+        ExecutorConfig(
+            workers=args.workers,
+            idle_sleep_seconds=args.idle_sleep,
+            run_once=args.once,
+            work_intents=work_intents,
+        ),
+    )
     pool.run()
     return 0
+
+
+def parse_work_intents(values: list[str] | None) -> frozenset[str] | None:
+    if not values:
+        return None
+    allowed = {"review_only", "work_allowed"}
+    selected: set[str] = set()
+    for raw_value in values:
+        for raw_part in raw_value.split(","):
+            part = raw_part.strip().lower()
+            if not part or part == "all":
+                continue
+            if part not in allowed:
+                raise SystemExit(f"unknown work intent {part!r}; allowed values: all, review_only, work_allowed")
+            selected.add(part)
+    return frozenset(selected) if selected else None
 
 
 def job_dict(job):
@@ -402,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--timeout", type=int, default=3600, help="fallback OpenClaw agent timeout in seconds")
     s.add_argument("--review-timeout", type=int, default=900, help="OpenClaw agent timeout for review_only jobs")
     s.add_argument("--work-timeout", type=int, default=3600, help="OpenClaw agent timeout for work_allowed jobs")
+    s.add_argument("--work-intent", action="append", help="limit this executor to work intents: all, review_only, work_allowed; repeat or comma-separate")
     s.add_argument("--cli-grace", type=int, default=60, help="extra seconds the bridge waits for openclaw CLI cleanup after agent timeout")
     s.add_argument("--openclaw-bin", default=os.getenv("OPENCLAW_BIN", "openclaw")); s.add_argument("--node-bin", default=os.getenv("NODE_BIN"))
     s.add_argument("--gh-bin", default="gh"); s.add_argument("--channel", default=os.getenv("GITHUB_AGENT_BRIDGE_DEFAULT_CHANNEL", "telegram")); s.add_argument("--to", default=os.getenv("GITHUB_AGENT_BRIDGE_DEFAULT_TO", ""))

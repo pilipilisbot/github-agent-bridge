@@ -1,12 +1,26 @@
 import json
 from email.message import EmailMessage
 
-from github_agent_bridge.cli import _parse_github_comment_url, msg_to_notification, notification_from_comment_url
+import pytest
+
+from github_agent_bridge.cli import _parse_github_comment_url, msg_to_notification, notification_from_comment_url, parse_work_intents
 from github_agent_bridge.parser import extract_github_context
 
 
 def test_parse_github_comment_url():
     assert _parse_github_comment_url("https://github.com/gisce/erp/pull/27675#issuecomment-4419572864") == ("gisce/erp", 27675, 4419572864)
+
+
+def test_parse_work_intents_accepts_repeated_and_comma_values():
+    assert parse_work_intents(["review_only,work_allowed"]) == frozenset({"review_only", "work_allowed"})
+    assert parse_work_intents(["review_only", "work_allowed"]) == frozenset({"review_only", "work_allowed"})
+    assert parse_work_intents(["all"]) is None
+    assert parse_work_intents(None) is None
+
+
+def test_parse_work_intents_rejects_unknown_values():
+    with pytest.raises(SystemExit):
+        parse_work_intents(["review_only,unknown"])
 
 
 def test_notification_from_comment_url_builds_bridge_notification(monkeypatch):

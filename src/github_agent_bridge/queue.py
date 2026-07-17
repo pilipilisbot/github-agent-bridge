@@ -143,14 +143,24 @@ class JobQueue:
                 row = con.execute("SELECT * FROM jobs WHERE message_id=?", (n.message_id,)).fetchone()
                 return self._row_to_job(row) if row else None, "duplicate"
 
-    def claim_next(self, worker_id: str) -> Job | None:
+    def claim_next(self, worker_id: str, work_intents: frozenset[str] | set[str] | None = None) -> Job | None:
         now = utc_now()
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            intent_filter = ""
+            args: list[object] = []
+            if work_intents is not None:
+                if not work_intents:
+                    con.commit()
+                    return None
+                intent_filter = f"AND j.work_intent IN ({','.join('?' for _ in work_intents)})"
+                args.extend(sorted(work_intents))
             row = con.execute(
-                """SELECT * FROM jobs j WHERE j.status='pending'
+                f"""SELECT * FROM jobs j WHERE j.status='pending'
+                {intent_filter}
                 AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.work_key=j.work_key AND r.status='running')
-                ORDER BY j.created_at LIMIT 1"""
+                ORDER BY j.created_at LIMIT 1""",
+                args,
             ).fetchone()
             if not row:
                 con.commit(); return None
