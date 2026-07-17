@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.56.0 (2026-07-17)
+
+### Features
+
+- Let workers claim jobs by intent
+  ([`af43bd4`](https://github.com/pilipilisbot/github-agent-bridge/commit/af43bd47f5546ba192b7576be68ea7be2e75e2a5))
+
+
 ## v0.55.0 (2026-07-16)
 
 ### Bug Fixes
