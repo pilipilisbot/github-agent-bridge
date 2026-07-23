@@ -190,13 +190,31 @@ class JobQueue:
             self._session_event(con, job_id, row["work_key"] if row else None, str(session_id), status, summary, detail)
             self._progress(con, job_id, row["work_key"] if row else None, "semantic", status, summary, detail)
 
-    def requeue_running(self, job_id: int, summary: str, detail: str | None = None) -> bool:
+    def requeue_running(
+        self,
+        job_id: int,
+        summary: str,
+        detail: str | None = None,
+        *,
+        fresh_session: bool = False,
+    ) -> bool:
         now = utc_now()
         with self.connect() as con:
-            cur = con.execute("UPDATE jobs SET status='pending', locked_by=NULL, last_error=NULL, updated_at=? WHERE id=? AND status='running'", (now, job_id))
+            row = con.execute(
+                "SELECT work_key, metadata_json FROM jobs WHERE id=? AND status='running'",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            metadata = json.loads(row["metadata_json"] or "{}")
+            if fresh_session:
+                metadata["fresh_session_on_retry"] = True
+            cur = con.execute(
+                "UPDATE jobs SET status='pending', locked_by=NULL, last_error=NULL, updated_at=?, metadata_json=? WHERE id=? AND status='running'",
+                (now, json.dumps(metadata, sort_keys=True), job_id),
+            )
             if cur.rowcount:
-                row = con.execute("SELECT work_key FROM jobs WHERE id=?", (job_id,)).fetchone()
-                self._log(con, job_id, row["work_key"] if row else None, "retry", summary, detail)
+                self._log(con, job_id, row["work_key"], "retry", summary, detail)
             return bool(cur.rowcount)
 
     def update_work_intent(self, job_id: int, work_intent: str, summary: str) -> Job | None:

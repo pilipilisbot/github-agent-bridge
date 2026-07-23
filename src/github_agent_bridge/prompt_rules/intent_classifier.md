@@ -10,6 +10,7 @@ Return exactly one JSON object and no prose:
   "action": "reply_comment",
   "work_intent": "review_only",
   "write_permission": "none",
+  "complexity": "substantive",
   "scope": "Concrete scope of any requested repository state change, or empty string.",
   "main_request": "What the user is mainly asking the bot to do.",
   "subordinate_reason": "Any reason, consequence, or motivation the user gives for the main request.",
@@ -34,10 +35,17 @@ Allowed `write_permission` values:
 - `none`
 - `state_change_allowed`
 
+Allowed `complexity` values:
+- `mechanical`
+- `substantive`
+
 Definitions:
 - Use `review_only` when the user asks only for an opinion, analysis, review, diagnosis, explanation, or discussion.
 - Use `work_allowed` when the user asks the bot to create or modify code, tests, files, issues, PR metadata, labels, assignments, comments with durable outcomes, or any repository state.
 - Use `state_change_allowed` only when the main request asks the configured agent to perform a repository state change. Otherwise use `none`.
+- Use `mechanical` only for a small, deterministic, localized operation whose exact outcome is clear without architectural, diagnostic, migration, security, or domain reasoning. Examples include post-merge synchronization, renaming an exact symbol, changing a literal value, or applying an explicitly specified one-file edit.
+- Use `substantive` for everything else, including code review, debugging, ambiguous requests, multi-file behavior changes, schema/data migrations, domain-sensitive ERP logic, security changes, or any task where a stronger model could materially improve correctness.
+- When unsure, use `substantive`.
 - Use `open_issue` when the user asks to create/open/file an issue, even from a pull-request thread.
 - Use `submit_review` only for formal review-request events, not ordinary comments asking for changes.
 - Use `workflow_run_failed` only for failed GitHub Actions/workflow notifications.

@@ -8,6 +8,7 @@ from .models import GitHubContext, Notification
 
 ALLOWED_REPO_ROLES = {"owner", "maintainer", "contributor", "reviewer"}
 ALLOWED_THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"}
+ALLOWED_COMPLEXITIES = {"mechanical", "substantive"}
 ALLOWED_PROMPT_INTENTS = {"review_only"}
 ALLOWED_PROMPT_RULES = {
     "comment_value",
@@ -24,6 +25,15 @@ ALLOWED_PROMPT_RULES = {
 }
 DEFAULT_REPO_ROLE = "contributor"
 DEFAULT_BOT_LOGINS = frozenset({"pilipilisbot"})
+
+
+def complexity_from_metadata(metadata: dict | None) -> str:
+    classifier = (metadata or {}).get("intent_classifier")
+    llm = classifier.get("llm") if isinstance(classifier, dict) else None
+    if not isinstance(llm, dict) or not llm.get("applied"):
+        return "substantive"
+    complexity = str(llm.get("complexity") or "substantive").lower()
+    return complexity if complexity in ALLOWED_COMPLEXITIES else "substantive"
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,7 @@ class RepoModelRoutes:
     default: ModelRoute | None = None
     by_action: dict[str, ModelRoute] = field(default_factory=dict)
     by_intent: dict[str, ModelRoute] = field(default_factory=dict)
+    by_complexity: dict[str, ModelRoute] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -63,6 +74,7 @@ class ModelRoutes:
     default: ModelRoute | None = None
     by_action: dict[str, ModelRoute] = field(default_factory=dict)
     by_intent: dict[str, ModelRoute] = field(default_factory=dict)
+    by_complexity: dict[str, ModelRoute] = field(default_factory=dict)
     by_repo: dict[str, RepoModelRoutes] = field(default_factory=dict)
 
 
@@ -170,6 +182,16 @@ class Policy:
                     routes[str(key).lower()] = route
             return routes
 
+        def complexity_route_map(raw: dict | None, path: str) -> dict[str, ModelRoute]:
+            routes = model_route_map(raw, path)
+            unknown = sorted(set(routes) - ALLOWED_COMPLEXITIES)
+            if unknown:
+                raise ValueError(
+                    f"{path} has unknown complexity value(s): {unknown}; "
+                    f"allowed values: {sorted(ALLOWED_COMPLEXITIES)}"
+                )
+            return routes
+
         def repo_model_routes(raw: dict | None, path: str) -> RepoModelRoutes:
             raw = raw or {}
             if not isinstance(raw, dict):
@@ -178,6 +200,7 @@ class Policy:
                 default=model_route(raw.get("default"), f"{path}.default"),
                 by_action=model_route_map(raw.get("byAction"), f"{path}.byAction"),
                 by_intent=model_route_map(raw.get("byIntent"), f"{path}.byIntent"),
+                by_complexity=complexity_route_map(raw.get("byComplexity"), f"{path}.byComplexity"),
             )
 
         def model_routes(raw: dict | None) -> ModelRoutes:
@@ -191,6 +214,7 @@ class Policy:
                 default=model_route(raw.get("default"), "modelRoutes.default"),
                 by_action=model_route_map(raw.get("byAction"), "modelRoutes.byAction"),
                 by_intent=model_route_map(raw.get("byIntent"), "modelRoutes.byIntent"),
+                by_complexity=complexity_route_map(raw.get("byComplexity"), "modelRoutes.byComplexity"),
                 by_repo={str(repo).lower(): repo_model_routes(value, f"modelRoutes.byRepo.{repo}") for repo, value in by_repo.items()},
             )
 
@@ -332,14 +356,24 @@ class Policy:
         repo = (repo or "").lower(); org = repo.split("/", 1)[0] if "/" in repo else ""
         return self.repo_roles.get(repo) or self.org_roles.get(org) or DEFAULT_REPO_ROLE
 
-    def model_route_for(self, repo: str | None, action: str, work_intent: str) -> ModelRoute:
+    def model_route_for(
+        self,
+        repo: str | None,
+        action: str,
+        work_intent: str,
+        complexity: str = "substantive",
+    ) -> ModelRoute:
         repo_key = (repo or "").lower()
         action_key = (action or "").lower()
         intent_key = (work_intent or "").lower()
+        complexity_key = (complexity or "substantive").lower()
+        if complexity_key not in ALLOWED_COMPLEXITIES:
+            complexity_key = "substantive"
         repo_routes = self.model_routes.by_repo.get(repo_key)
         if repo_routes:
             route = (
                 repo_routes.by_action.get(action_key)
+                or repo_routes.by_complexity.get(complexity_key)
                 or repo_routes.by_intent.get(intent_key)
                 or repo_routes.default
             )
@@ -347,6 +381,7 @@ class Policy:
                 return route
         return (
             self.model_routes.by_action.get(action_key)
+            or self.model_routes.by_complexity.get(complexity_key)
             or self.model_routes.by_intent.get(intent_key)
             or self.model_routes.default
             or ModelRoute()

@@ -21,6 +21,7 @@ ALLOWED_ACTIONS = {
 }
 ALLOWED_WORK_INTENTS = {"review_only", "work_allowed"}
 ALLOWED_WRITE_PERMISSIONS = {"none", "state_change_allowed"}
+ALLOWED_COMPLEXITIES = {"mechanical", "substantive"}
 INTENT_CLASSIFIER_PROMPT = load_prompt_rule("intent_classifier.md")
 COMMENT_TARGET_KINDS = {"issue_comment", "review_comment", "commit_comment", "review"}
 
@@ -43,6 +44,7 @@ class IntentClassification:
     scope: str = ""
     main_request: str = ""
     subordinate_reason: str = ""
+    complexity: str = "substantive"
 
     def to_metadata(self) -> dict[str, object]:
         metadata: dict[str, object] = {
@@ -53,6 +55,7 @@ class IntentClassification:
             "applied": self.applied,
             "addressed_to_agent": self.addressed_to_agent,
             "write_permission": self.write_permission,
+            "complexity": self.complexity,
         }
         if self.scope:
             metadata["scope"] = self.scope
@@ -145,6 +148,9 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
     scope = compact(str(result.get("scope") or ""), 500)
     main_request = compact(str(result.get("main_request") or ""), 500)
     subordinate_reason = compact(str(result.get("subordinate_reason") or ""), 500)
+    complexity = str(result.get("complexity") or "substantive").strip().lower()
+    if complexity not in ALLOWED_COMPLEXITIES:
+        complexity = "substantive"
     reason = compact(str(result.get("reason") or ""), 500)
     applied = action in ALLOWED_ACTIONS and work_intent in ALLOWED_WORK_INTENTS and confidence >= min_confidence
     return IntentClassification(
@@ -158,6 +164,7 @@ def normalize_result(result: dict[str, Any], min_confidence: float) -> IntentCla
         scope=scope,
         main_request=main_request,
         subordinate_reason=subordinate_reason,
+        complexity=complexity,
     )
 
 

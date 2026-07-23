@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from github_agent_bridge.autoupdate import (
+    _model_smoke_postcheck,
     apply_update_plan,
     complete_pending_reload,
     default_install_command,
@@ -31,6 +32,66 @@ def release_runner(tag: str, files: list[str]):
         return completed("", 1)
 
     return run
+
+
+def test_model_smoke_postcheck_runs_all_required_routes(tmp_path):
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "repoRoutes": {"gisce/erp": {"agent": "gisce-developer"}},
+                "intentClassifier": {
+                    "model": "openai/gpt-5.4-mini",
+                    "thinking": "low",
+                },
+                "feedbackLearning": {
+                    "model": "openai/gpt-5.4-mini",
+                    "thinking": "low",
+                },
+                "modelRoutes": {
+                    "byRepo": {
+                        "gisce/erp": {
+                            "default": {
+                                "model": "codex/gpt-5.6-sol",
+                                "thinking": "xhigh",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+    calls: list[list[str]] = []
+
+    def runner(args, cwd):
+        command = list(args)
+        calls.append(command)
+        marker = command[command.index("--message") + 1].rsplit(" ", 1)[-1]
+        return completed(json.dumps({"result": {"payloads": [{"text": marker}]}}))
+
+    checks = _model_smoke_postcheck(
+        policy_path,
+        openclaw_bin="/usr/bin/openclaw",
+        runner=runner,
+    )
+
+    assert [check["route"] for check in checks] == [
+        "intent_classifier",
+        "feedback_learning",
+        "erp_substantive",
+    ]
+    assert all(check["ok"] for check in checks)
+    assert [call[call.index("--model") + 1] for call in calls] == [
+        "openai/gpt-5.4-mini",
+        "openai/gpt-5.4-mini",
+        "codex/gpt-5.6-sol",
+    ]
+    assert [call[call.index("--thinking") + 1] for call in calls] == [
+        "low",
+        "low",
+        "xhigh",
+    ]
+    assert all(call[call.index("--agent") + 1] == "gisce-developer" for call in calls)
 
 
 def enqueue_job(q: JobQueue) -> int:

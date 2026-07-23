@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 
 from .dispatch import GitHubClient, OpenClawDispatcher
-from .policy import Policy
+from .policy import Policy, complexity_from_metadata
 from .queue import JobQueue
 from .session_events import redact_event_detail
 from .web_push import notify_job_completion
@@ -87,8 +87,16 @@ class ExecutorPool:
                 )
             reaction_ok = self.react_eyes_for_job_contexts(job)
             self.queue.add_session_event(job.id, "dispatch_started", "OpenClaw agent dispatch started", f"reaction_ok={reaction_ok}")
-            model_route = self.policy.model_route_for(job.repo, job.action, job.work_intent)
+            complexity = complexity_from_metadata(job.metadata)
+            model_route = self.policy.model_route_for(job.repo, job.action, job.work_intent, complexity)
             self.queue.add_session_event(job.id, "model_route_selected", "OpenClaw model route selected", model_route.summary())
+            if job.metadata.get("fresh_session_on_retry") and job.attempts > 1:
+                self.queue.add_session_event(
+                    job.id,
+                    "session_rescue_selected",
+                    "fresh OpenClaw session selected after compaction failure",
+                    f"attempt={job.attempts}",
+                )
             result = self.dispatcher.dispatch(
                 job,
                 self.policy,
@@ -126,7 +134,12 @@ class ExecutorPool:
                     self._finish(job, "blocked", summary, detail, notify_completion=True, followup_url=followup_url)
                     return True
                 if self._dispatch_failure_is_retryable(result) and job.attempts <= self.config.transient_dispatch_retries:
-                    self.queue.requeue_running(job.id, "transient OpenClaw dispatch failure; auto-requeued", result.detail)
+                    self.queue.requeue_running(
+                        job.id,
+                        "transient OpenClaw dispatch failure; auto-requeued",
+                        result.detail,
+                        fresh_session=self._dispatch_failure_needs_fresh_session(result),
+                    )
                     return True
                 self._finish(job, "blocked", reason, result.detail, notify_completion=True)
         except Exception as exc:
@@ -169,6 +182,11 @@ class ExecutorPool:
             return False
         output = f"{result.stdout}\n{result.stderr}\n{result.detail}".lower()
         return any(marker in output for marker in TRANSIENT_DISPATCH_ERROR_MARKERS)
+
+    @staticmethod
+    def _dispatch_failure_needs_fresh_session(result: DispatchResult) -> bool:
+        output = f"{result.stdout}\n{result.stderr}\n{result.detail}".lower()
+        return "transcript compaction failed" in output or "turn prefix summarization failed" in output
 
     def react_eyes_for_job_contexts(self, job) -> bool:
         contexts = [job.context, *self.queue.coalesced_contexts(job.id)]

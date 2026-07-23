@@ -11,6 +11,7 @@ from typing import Any
 
 from . import __version__
 from .models import utc_now
+from .policy import Policy
 from .queue import JobQueue
 
 CommandRunner = Callable[[Sequence[str], Path | None], subprocess.CompletedProcess[str]]
@@ -299,6 +300,68 @@ def _installed_version_from_command(command: Sequence[str], runner: CommandRunne
     return _command_result("postcheck", command, proc, reason="verify installed package version"), proc.stdout.strip()
 
 
+def _model_smoke_postcheck(
+    policy_path: str | Path,
+    *,
+    openclaw_bin: str,
+    runner: CommandRunner,
+) -> list[dict[str, Any]]:
+    policy = Policy.from_file(policy_path)
+    agent = policy.route_for("gisce/erp").agent
+    erp_route = policy.model_route_for(
+        "gisce/erp",
+        "reply_comment",
+        "work_allowed",
+        "substantive",
+    )
+    specs = [
+        ("intent_classifier", policy.intent_classifier.model, policy.intent_classifier.thinking),
+        ("feedback_learning", policy.feedback_learning.model, policy.feedback_learning.thinking),
+        ("erp_substantive", erp_route.model, erp_route.thinking),
+    ]
+    checks: list[dict[str, Any]] = []
+    timestamp = utc_now().replace(":", "").replace("-", "")
+    for name, model, thinking in specs:
+        marker = f"GAB_MODEL_SMOKE_{name.upper()}_OK"
+        command = [
+            openclaw_bin,
+            "agent",
+            "--json",
+            "--session-id",
+            f"github-agent-bridge-model-smoke-{name}-{timestamp}",
+            "--session-key",
+            f"github-agent-bridge:model-smoke:{name}:{timestamp}",
+            "--timeout",
+            "180",
+            "--thinking",
+            thinking or "low",
+            "--message",
+            f"Return exactly this text and nothing else: {marker}",
+        ]
+        if agent:
+            command.extend(["--agent", agent])
+        if model:
+            command.extend(["--model", model])
+        proc = runner(command, None)
+        check = _command_result(
+            "postcheck",
+            command,
+            proc,
+            reason=f"verify {name} model route",
+        )
+        check.update(
+            {
+                "name": "model_smoke",
+                "route": name,
+                "model": model or "",
+                "thinking": thinking or "",
+                "ok": proc.returncode == 0 and marker in proc.stdout,
+            }
+        )
+        checks.append(check)
+    return checks
+
+
 def _postcheck_update(
     db: str | Path | None,
     plan: dict[str, Any],
@@ -306,6 +369,8 @@ def _postcheck_update(
     systemctl_bin: str,
     run_systemd: bool,
     runner: CommandRunner,
+    policy_path: str | Path | None = None,
+    openclaw_bin: str = "openclaw",
 ) -> dict[str, Any]:
     checks: dict[str, Any] = {"ok": False, "checks": [], "errors": []}
     target = plan.get("target") if isinstance(plan.get("target"), dict) else {}
@@ -350,6 +415,23 @@ def _postcheck_update(
             checks["checks"].append(check)
             if not check["ok"]:
                 checks["errors"].append(f"service_not_active:{unit}")
+
+    if policy_path is not None:
+        try:
+            model_checks = _model_smoke_postcheck(
+                policy_path,
+                openclaw_bin=openclaw_bin,
+                runner=runner,
+            )
+        except Exception as exc:
+            checks["errors"].append(f"model_smoke_setup_failed:{exc}")
+        else:
+            checks["checks"].extend(model_checks)
+            checks["errors"].extend(
+                f"model_smoke_failed:{check['route']}"
+                for check in model_checks
+                if not check["ok"]
+            )
 
     checks["ok"] = not checks["errors"]
     return checks
@@ -396,6 +478,8 @@ def apply_update_plan(
     run_migrations: bool = True,
     run_systemd: bool = True,
     run_postchecks: bool = True,
+    policy_path: str | Path | None = None,
+    openclaw_bin: str = "openclaw",
     runner: CommandRunner = _default_runner,
 ) -> dict[str, Any]:
     """Execute the safe, immediate subset described by an update plan."""
@@ -492,6 +576,8 @@ def apply_update_plan(
             systemctl_bin=systemctl_bin,
             run_systemd=run_systemd,
             runner=runner,
+            policy_path=policy_path,
+            openclaw_bin=openclaw_bin,
         )
         if not result["postcheck"].get("ok"):
             result["blocked"].append("postcheck_failed")

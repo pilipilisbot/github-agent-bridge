@@ -504,6 +504,13 @@ def test_transient_dispatch_failure_is_requeued(tmp_path):
     assert stored.status == "pending"
     assert stored.last_error is None
     assert stored.attempts == 1
+    assert stored.metadata["fresh_session_on_retry"] is True
+
+    assert pool.work_one("worker-test") is True
+    retry = dispatcher.jobs[-1]
+    assert retry.attempts == 2
+    events = job_session_events(queue.path, job.id, limit=50)
+    assert any(event["event_type"] == "session_rescue_selected" for event in events)
 
 
 def test_transient_dispatch_failure_blocks_after_retry_budget(tmp_path):

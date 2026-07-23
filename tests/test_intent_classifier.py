@@ -111,6 +111,7 @@ def test_normalize_result_preserves_semantic_decomposition_metadata():
             "action": "reply_comment",
             "work_intent": "work_allowed",
             "write_permission": "state_change_allowed",
+            "complexity": "mechanical",
             "scope": "Create one PR per notification.",
             "main_request": "Fer una pull request separada per cada notificació.",
             "subordinate_reason": "Així serà més fàcil revisar-ho i integrar-ho.",
@@ -123,9 +124,27 @@ def test_normalize_result_preserves_semantic_decomposition_metadata():
     assert result.applied is True
     assert result.to_metadata()["addressed_to_agent"] is True
     assert result.to_metadata()["write_permission"] == "state_change_allowed"
+    assert result.to_metadata()["complexity"] == "mechanical"
     assert result.to_metadata()["scope"] == "Create one PR per notification."
     assert result.to_metadata()["main_request"] == "Fer una pull request separada per cada notificació."
     assert result.to_metadata()["subordinate_reason"] == "Així serà més fàcil revisar-ho i integrar-ho."
+
+
+def test_normalize_result_defaults_unknown_complexity_to_substantive():
+    result = normalize_result(
+        {
+            "addressed_to_agent": True,
+            "action": "reply_comment",
+            "work_intent": "review_only",
+            "write_permission": "none",
+            "complexity": "easy",
+            "confidence": 0.95,
+            "reason": "Review requested.",
+        },
+        0.75,
+    )
+
+    assert result.complexity == "substantive"
 
 
 def test_normalize_result_downgrades_unaddressed_events_to_archive():
