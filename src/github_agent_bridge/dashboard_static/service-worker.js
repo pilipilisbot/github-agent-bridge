@@ -16,6 +16,7 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "GitHub Agent Bridge";
   const status = String(payload.status || "");
   const isBlocked = status === "blocked";
+  const isFailed = status === "failed";
   const jobUrl = payload.job_url || (payload.job_id ? `/jobs/${payload.job_id}` : "/");
   const githubUrl = payload.github_url || payload.followup_url || "";
   const timestamp = payload.timestamp ? Date.parse(payload.timestamp) : Date.now();
@@ -27,9 +28,9 @@ self.addEventListener("push", (event) => {
     icon: payload.icon || "/bridge-icon.svg",
     badge: "/bridge-badge.svg",
     timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp,
-    requireInteraction: isBlocked,
-    renotify: isBlocked,
-    vibrate: isBlocked ? [120, 80, 120] : undefined,
+    requireInteraction: isBlocked || isFailed,
+    renotify: isBlocked || isFailed,
+    vibrate: isBlocked || isFailed ? [120, 80, 120] : undefined,
     actions,
     data: {
       url: payload.url || jobUrl,

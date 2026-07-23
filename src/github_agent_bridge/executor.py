@@ -131,7 +131,7 @@ class ExecutorPool:
                 if followup_url:
                     summary = "dispatch failed after producing visible GitHub follow-up"
                     detail = f"followup_url={followup_url}; {reason}; {result.detail}"
-                    self._finish(job, "blocked", summary, detail, notify_completion=True, followup_url=followup_url)
+                    self._finish(job, "failed", summary, detail, notify_completion=True, followup_url=followup_url)
                     return True
                 if self._dispatch_failure_is_retryable(result) and job.attempts <= self.config.transient_dispatch_retries:
                     self.queue.requeue_running(

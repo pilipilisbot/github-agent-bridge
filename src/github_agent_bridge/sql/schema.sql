@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   work_key TEXT NOT NULL,
   repo TEXT,
   thread INTEGER,
-  status TEXT NOT NULL CHECK(status IN ('pending','running','done','blocked','denied','waiting_approval')),
+  status TEXT NOT NULL CHECK(status IN ('pending','running','done','failed','blocked','denied','waiting_approval')),
   action TEXT NOT NULL,
   decision TEXT NOT NULL,
   work_intent TEXT NOT NULL,

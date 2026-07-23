@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowLeft, Bell, Brain, CheckCircle2, ChevronDown, Clock3, Cpu, Eye, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, Wrench, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Bell, Brain, CheckCircle2, ChevronDown, CircleX, Clock3, Cpu, Eye, ExternalLink, Filter, Gauge, KeyRound, Link, Pencil, RefreshCw, RotateCcw, Save, Search, ShieldCheck, TerminalSquare, TimerReset, Trash2, UserCircle2, Wrench, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
@@ -663,6 +663,7 @@ function statusTone(status: string) {
     pending: { badge: "border-amber-300 bg-amber-50 text-amber-800", dot: "bg-amber-500" },
     running: { badge: "border-blue-300 bg-blue-50 text-blue-700", dot: "bg-blue-600" },
     blocked: { badge: "border-red-300 bg-red-50 text-red-700", dot: "bg-red-600" },
+    failed: { badge: "border-rose-300 bg-rose-50 text-rose-700", dot: "bg-rose-600" },
     denied: { badge: "border-red-300 bg-red-50 text-red-700", dot: "bg-red-600" },
     done: { badge: "border-emerald-300 bg-emerald-50 text-emerald-700", dot: "bg-emerald-600" },
     waiting_approval: { badge: "border-slate-300 bg-slate-50 text-slate-700", dot: "bg-slate-500" },
@@ -746,11 +747,11 @@ function transcriptKey(item: TranscriptEntry) {
 }
 
 function shouldRefreshJobForSessionEvent(eventType: string) {
-  return ["claimed", "dispatch_started", "dispatch_finished", "done", "blocked", "denied", "waiting_approval"].includes(eventType);
+  return ["claimed", "dispatch_started", "dispatch_finished", "done", "failed", "blocked", "denied", "waiting_approval"].includes(eventType);
 }
 
 function isRetryableStatus(status: string) {
-  return ["blocked", "denied", "waiting_approval"].includes(status);
+  return ["blocked", "failed", "denied", "waiting_approval"].includes(status);
 }
 
 function selectedJobIdFromPath(pathname = window.location.pathname) {
@@ -1122,10 +1123,11 @@ function App() {
               onApply={() => runAutoupdateAction("apply")}
               onCompletePending={() => runAutoupdateAction("complete")}
             />
-            <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Summary metrics">
+            <section className="grid grid-cols-2 gap-3 xl:grid-cols-5" aria-label="Summary metrics">
               <Metric title="Pending" value={counts.pending ?? 0} icon={<Clock3 className="h-5 w-5" />} />
               <Metric title="Running" value={counts.running ?? 0} icon={<Activity className="h-5 w-5" />} />
               <Metric title="Blocked" value={counts.blocked ?? 0} icon={<AlertTriangle className="h-5 w-5" />} />
+              <Metric title="Failed" value={counts.failed ?? 0} icon={<CircleX className="h-5 w-5" />} />
               <Metric title="Done" value={counts.done ?? 0} icon={<CheckCircle2 className="h-5 w-5" />} />
             </section>
 
@@ -2455,6 +2457,7 @@ function Filters({ filters, actorOptions, onChange }: { filters: JobFilters; act
             <option value="pending">pending</option>
             <option value="running">running</option>
             <option value="blocked">blocked</option>
+            <option value="failed">failed</option>
             <option value="done">done</option>
             <option value="denied">denied</option>
             <option value="waiting_approval">waiting_approval</option>

@@ -18,6 +18,7 @@ JOB_LIST_ORDER_SQL = """
         WHEN 'pending' THEN 1
         WHEN 'waiting_approval' THEN 2
         WHEN 'blocked' THEN 3
+        WHEN 'failed' THEN 3
         WHEN 'denied' THEN 3
         WHEN 'done' THEN 4
         ELSE 5

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from importlib import resources
 from pathlib import Path
@@ -41,6 +42,7 @@ class JobQueue:
     def init(self) -> None:
         with self.connect() as con:
             con.executescript(SCHEMA)
+            self._ensure_job_status_constraint(con)
             self._ensure_columns(con)
 
     def enqueue(self, n: Notification, policy: Policy) -> tuple[Job | None, str]:
@@ -183,7 +185,7 @@ class JobQueue:
     def finish(self, job_id: int, status: str, summary: str, detail: str | None = None) -> None:
         now = utc_now()
         with self.connect() as con:
-            con.execute("UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=?, updated_at=? WHERE id=?", (status, detail if status == "blocked" else None, now, now, job_id))
+            con.execute("UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=?, updated_at=? WHERE id=?", (status, detail if status in {"blocked", "failed"} else None, now, now, job_id))
             row = con.execute("SELECT work_key FROM jobs WHERE id=?", (job_id,)).fetchone()
             self._log(con, job_id, row["work_key"] if row else None, status, summary, detail)
             metadata = self._job_metadata(con, job_id)
@@ -256,7 +258,7 @@ class JobQueue:
         now = utc_now()
         summary = f"job requeued by @{actor}" if actor else "job requeued"
         with self.connect() as con:
-            cur = con.execute("UPDATE jobs SET status='pending', locked_by=NULL, last_error=NULL, updated_at=? WHERE id=? AND status IN ('blocked','denied','waiting_approval')", (now, job_id))
+            cur = con.execute("UPDATE jobs SET status='pending', locked_by=NULL, last_error=NULL, updated_at=? WHERE id=? AND status IN ('blocked','failed','denied','waiting_approval')", (now, job_id))
             if cur.rowcount:
                 row = con.execute("SELECT work_key FROM jobs WHERE id=?", (job_id,)).fetchone()
                 self._log(con, job_id, row["work_key"] if row else None, "retry", summary, None)
@@ -266,7 +268,7 @@ class JobQueue:
         now = utc_now()
         with self.connect() as con:
             cur = con.execute(
-                "UPDATE jobs SET status='done', locked_by=NULL, last_error=NULL, finished_at=COALESCE(finished_at, ?), updated_at=? WHERE id=? AND status IN ('blocked','denied','waiting_approval')",
+                "UPDATE jobs SET status='done', locked_by=NULL, last_error=NULL, finished_at=COALESCE(finished_at, ?), updated_at=? WHERE id=? AND status IN ('blocked','failed','denied','waiting_approval')",
                 (now, now, job_id),
             )
             if cur.rowcount:
@@ -358,6 +360,48 @@ class JobQueue:
             for column, definition in columns.items():
                 if column not in existing:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _ensure_job_status_constraint(self, con: sqlite3.Connection) -> None:
+        row = con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()
+        table_sql = str(row["sql"] or "") if row else ""
+        if "'failed'" in table_sql:
+            return
+        match = re.search(
+            r"CREATE TABLE IF NOT EXISTS jobs \((?:.|\n)*?\n\);",
+            SCHEMA,
+        )
+        if match is None:
+            raise RuntimeError("packaged jobs schema not found")
+        replacement_sql = match.group(0).replace(
+            "CREATE TABLE IF NOT EXISTS jobs",
+            "CREATE TABLE jobs_new",
+            1,
+        )
+        con.commit()
+        con.execute("PRAGMA foreign_keys=OFF")
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(replacement_sql)
+            old_columns = {str(column["name"]) for column in con.execute("PRAGMA table_info(jobs)")}
+            new_columns = [str(column["name"]) for column in con.execute("PRAGMA table_info(jobs_new)")]
+            shared_columns = [column for column in new_columns if column in old_columns]
+            rendered_columns = ",".join(f'"{column}"' for column in shared_columns)
+            con.execute(
+                f"INSERT INTO jobs_new ({rendered_columns}) SELECT {rendered_columns} FROM jobs"
+            )
+            con.execute("DROP TABLE jobs")
+            con.execute("ALTER TABLE jobs_new RENAME TO jobs")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at)")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_jobs_work_status ON jobs(work_key, status)")
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.execute("PRAGMA foreign_keys=ON")
+        violations = list(con.execute("PRAGMA foreign_key_check"))
+        if violations:
+            raise RuntimeError(f"foreign key violations after jobs migration: {violations}")
 
     def _row_to_job(self, row: sqlite3.Row | None) -> Job | None:
         if row is None:

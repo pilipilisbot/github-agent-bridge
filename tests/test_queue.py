@@ -1,7 +1,9 @@
+import sqlite3
+
 from github_agent_bridge.models import Notification
 from github_agent_bridge.intent_classifier import IntentClassification
 from github_agent_bridge.policy import FeedbackLearning, IntentClassifier, Policy
-from github_agent_bridge.queue import JobQueue
+from github_agent_bridge.queue import JobQueue, SCHEMA
 
 BODY1 = "@pilipilisbot one https://github.com/gisce/erp/pull/1#issuecomment-10"
 BODY2 = "@pilipilisbot two https://github.com/gisce/erp/pull/1#issuecomment-11"
@@ -466,6 +468,41 @@ def test_dismiss_blocked_job_marks_done(tmp_path):
     assert stored.last_error is None
     with q.connect() as con:
         assert con.execute("SELECT finished_at FROM jobs WHERE id=?", (job.id,)).fetchone()["finished_at"] == finished_at
+
+
+def test_init_migrates_legacy_jobs_constraint_to_failed_status(tmp_path):
+    db = tmp_path / "legacy.sqlite3"
+    legacy_schema = SCHEMA.replace("'done','failed','blocked'", "'done','blocked'")
+    with sqlite3.connect(db) as con:
+        con.executescript(legacy_schema)
+        con.execute(
+            """INSERT INTO jobs(
+                id,work_key,repo,thread,status,action,decision,work_intent,subject,
+                message_id,context_json,metadata_json,created_at,updated_at
+            ) VALUES(1,'gisce/erp#1','gisce/erp',1,'blocked','reply_comment',
+                'auto_trusted','work_allowed','subject','<legacy@github.com>',
+                '{"urls":[],"repo":"gisce/erp","issue_number":1}','{}',
+                '2026-07-23T00:00:00Z','2026-07-23T00:00:00Z')"""
+        )
+        con.execute(
+            """INSERT INTO job_session_events(
+                ts,job_id,work_key,session_id,event_type,summary,detail
+            ) VALUES('2026-07-23T00:00:00Z',1,'gisce/erp#1','legacy-session',
+                'blocked','legacy event',NULL)"""
+        )
+
+    q = JobQueue(db)
+    q.finish(1, "failed", "dispatch failed after visible result", "403 during compaction")
+
+    stored = q.get(1)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.last_error == "403 during compaction"
+    with q.connect() as con:
+        table_sql = con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()["sql"]
+        assert "'failed'" in table_sql
+        assert con.execute("SELECT COUNT(*) FROM job_session_events WHERE job_id=1").fetchone()[0] == 2
+        assert list(con.execute("PRAGMA foreign_key_check")) == []
 
 
 def test_unlock_stale_can_limit_to_selected_running_jobs(tmp_path):
