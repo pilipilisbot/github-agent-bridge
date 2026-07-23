@@ -364,6 +364,7 @@ def cmd_feedback_learn(args: argparse.Namespace) -> int:
         auto_approve_confidence=args.auto_approve_confidence if args.auto_approve_confidence is not None else policy.feedback_learning.auto_approve_confidence,
         timeout=args.timeout,
         prompt_template=feedback.load_prompt_override(classifier_override) if classifier_override else None,
+        fallback_to_default_model=policy.feedback_learning.fallback_to_default_model,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

@@ -729,6 +729,31 @@ def test_learn_from_events_falls_back_when_model_override_is_not_allowed(tmp_pat
     assert feedback.list_proposals(db, status="rejected")[0]["model"] == ""
 
 
+def test_learn_from_events_can_fail_closed_when_model_override_is_not_allowed(tmp_path, monkeypatch):
+    db = tmp_path / "q.sqlite3"
+    JobQueue(db)
+    feedback.capture_feedback(db, notification(), context(), "reply_comment", "auto_trusted", "review_only")
+    seen_models = []
+
+    def fake_classify(event, **kwargs):
+        seen_models.append(kwargs.get("model"))
+        raise RuntimeError('GatewayClientRequestError: Error: Model override "openai/gpt-5.4-mini" is not allowed for agent "main".')
+
+    monkeypatch.setattr(feedback, "classify_event_with_llm", fake_classify)
+
+    result = feedback.learn_from_events(
+        db,
+        model="openai/gpt-5.4-mini",
+        fallback_to_default_model=False,
+        limit=5,
+        auto_approve_confidence=0.8,
+    )
+
+    assert seen_models == ["openai/gpt-5.4-mini"]
+    assert result["errors"] == 1
+    assert feedback.list_proposals(db, status="error")[0]["model"] == "openai/gpt-5.4-mini"
+
+
 def test_learn_from_events_rejects_task_specific_comments(tmp_path, monkeypatch):
     db = tmp_path / "q.sqlite3"
     JobQueue(db)

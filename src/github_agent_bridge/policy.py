@@ -92,6 +92,7 @@ class FeedbackLearning:
     model: str | None = None
     thinking: str = "low"
     session_id: str = "github-agent-bridge-feedback"
+    fallback_to_default_model: bool = True
 
 
 @dataclass(frozen=True)
@@ -248,6 +249,7 @@ class Policy:
                 model=str(model) if model else None,
                 thinking=str(raw.get("thinking", "low")),
                 session_id=str(raw.get("sessionId", "github-agent-bridge-feedback")),
+                fallback_to_default_model=bool(raw.get("fallbackToDefaultModel", True)),
             )
 
         def intent_classifier(raw: dict) -> IntentClassifier:

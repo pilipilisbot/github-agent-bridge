@@ -520,6 +520,7 @@ def learn_from_events(
     auto_approve_confidence: float = 0.8,
     timeout: int = 180,
     prompt_template: str | None = None,
+    fallback_to_default_model: bool = True,
 ) -> dict[str, Any]:
     events = pending_events(db_path, limit=limit)
     proposals = []
@@ -542,7 +543,7 @@ def learn_from_events(
                     prompt_template=prompt_template,
                 )
             except Exception as exc:
-                if not model or not is_model_override_not_allowed(exc):
+                if not model or not fallback_to_default_model or not is_model_override_not_allowed(exc):
                     raise
                 model_used = None
                 proposal = classify_event_with_llm(
