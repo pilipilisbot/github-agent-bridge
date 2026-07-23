@@ -117,7 +117,6 @@ describe("dashboard routing and API query helpers", () => {
 
   it("limits retry actions to manually recoverable job states", () => {
     expect(isRetryableStatus("blocked")).toBe(true);
-    expect(isRetryableStatus("failed")).toBe(true);
     expect(isRetryableStatus("denied")).toBe(true);
     expect(isRetryableStatus("waiting_approval")).toBe(true);
     expect(isRetryableStatus("pending")).toBe(false);

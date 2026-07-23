@@ -23,7 +23,7 @@ flowchart LR
 | Do not duplicate thread work | Active jobs with the same `work_key` coalesce. |
 | Do not serialize unrelated repos | Different `work_key`s can run in parallel. |
 | Do not widen trust accidentally | Policy gates source, scope, actions, routes, and roles. |
-| Do not let one failure jam everything | An incomplete dispatch becomes `blocked`; a failed dispatch with a visible partial result becomes `failed`; unrelated jobs continue. |
+| Do not let one failure jam everything | Failed dispatch marks one job `blocked`; unrelated jobs continue. |
 
 ## Components
 
@@ -73,7 +73,7 @@ Dispatch has two external side effects in live mode:
 1. apply GitHub 👀 reaction when possible;
 2. send one OpenClaw agent task with prompt rules and repository role context.
 
-If dispatch fails before producing a visible result, the job is marked `blocked`. If it already produced a visible GitHub result, it is marked `failed` instead so operators can distinguish an actionable blockage from a terminal partial failure. In both cases `last_error` is stored and the lock is released.
+If dispatch fails, the job is marked `blocked`, `last_error` is stored, and the lock is released.
 
 ## Prompt resources
 

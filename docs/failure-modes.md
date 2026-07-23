@@ -6,7 +6,6 @@ Known failures and expected containment behavior.
 | --- | --- | --- |
 | IMAP burst backlog | Reader enqueues oldest-first and never waits for agents. | Monitor pending age and worker capacity. |
 | Agent dispatch timeout | Job becomes `blocked`; unrelated jobs continue. | Inspect `last_error`, then retry or fix policy/agent issue. |
-| Agent exits unsuccessfully after publishing a visible GitHub result | Job becomes `failed`; the result URL and dispatch error are retained. | Audit the partial result before retrying to avoid duplicate comments or commits. |
 | Duplicate notification | Notification coalesces into active `work_key`. | No action unless coalescing count is suspiciously high. |
 | GitHub reaction failure | Agent dispatch continues if policy allows it. | Treat reaction as best-effort; inspect worklog if repeated. |
 | Stale running job | Monitor alerts; lock can be released manually. | Use `unlock-stale` after confirming no live agent is still acting. |

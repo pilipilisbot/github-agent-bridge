@@ -127,7 +127,7 @@ Run the dashboard behind HTTPS, set `GITHUB_AGENT_BRIDGE_DASHBOARD_PUBLIC_URL`
 to that external origin, and configure the VAPID key pair above. Each GitHub user
 must sign in to the dashboard and enable the bell control once; the subscription
 is stored against their GitHub login and the executor targets that login when a
-job they triggered finishes as `done`, `failed`, or `blocked`.
+job they triggered finishes as `done` or `blocked`.
 
 ## Start the Service
 
