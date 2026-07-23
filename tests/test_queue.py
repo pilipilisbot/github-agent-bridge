@@ -211,6 +211,21 @@ def test_claim_can_filter_by_work_intent(tmp_path):
     assert claimed.work_intent == "review_only"
 
 
+def test_claim_fresh_review_retry_records_attempt_session_id(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    q.update_work_intent(job.id, "review_only", "review-only request")
+
+    first = q.claim_next("review-worker")
+    assert first.metadata["openclaw_session_id"] == f"github-agent-bridge-job-{job.id}"
+    assert q.requeue_running(job.id, "compaction failed", fresh_session=True) is True
+
+    retry = q.claim_next("review-worker")
+
+    assert retry.attempts == 2
+    assert retry.metadata["openclaw_session_id"] == f"github-agent-bridge-job-{job.id}-attempt-2"
+
+
 def test_claim_filter_preserves_running_work_key_guard(tmp_path):
     q = JobQueue(tmp_path / "q.sqlite3")
     q.enqueue(notif(1, "<1@github.com>", BODY1), policy())

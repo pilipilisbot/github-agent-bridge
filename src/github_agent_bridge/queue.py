@@ -165,7 +165,8 @@ class JobQueue:
             if not row:
                 con.commit(); return None
             metadata = json.loads(row["metadata_json"] or "{}")
-            if row["work_intent"] == "work_allowed":
+            fresh_session = bool(metadata.get("fresh_session_on_retry")) and int(row["attempts"]) > 0
+            if fresh_session or row["work_intent"] == "work_allowed":
                 metadata["openclaw_session_id"] = session_id_for_job_attempt(int(row["id"]), int(row["attempts"]) + 1)
             else:
                 metadata.setdefault("openclaw_session_id", session_id_for_job(int(row["id"])))
