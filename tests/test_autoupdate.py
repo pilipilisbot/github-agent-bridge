@@ -52,7 +52,7 @@ def test_model_smoke_postcheck_runs_all_required_routes(tmp_path):
                     "byRepo": {
                         "gisce/erp": {
                             "default": {
-                                "model": "codex/gpt-5.6-sol",
+                                "model": "openai/gpt-5.6-sol",
                                 "thinking": "xhigh",
                             }
                         }
@@ -84,7 +84,7 @@ def test_model_smoke_postcheck_runs_all_required_routes(tmp_path):
     assert [call[call.index("--model") + 1] for call in calls] == [
         "openai/gpt-5.4-mini",
         "openai/gpt-5.4-mini",
-        "codex/gpt-5.6-sol",
+        "openai/gpt-5.6-sol",
     ]
     assert [call[call.index("--thinking") + 1] for call in calls] == [
         "low",

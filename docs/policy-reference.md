@@ -87,7 +87,7 @@ gab --policy ~/.config/github-agent-bridge/policy.json enqueue-comment-url ...
   },
   "intentClassifier": {
     "enabled": false,
-    "model": "gpt-5.4-mini",
+    "model": "openai/gpt-5.4-mini",
     "thinking": "low",
     "minConfidence": 0.75,
     "onlyWhenParserDefaulted": true,
@@ -706,7 +706,9 @@ Each route is an object with optional `model` and `thinking` fields. A route can
 set only one field; the bridge appends only the flags that are configured on the
 selected route. Supported `thinking` values are `off`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, `adaptive`, and `max`; invalid values fail policy
-load with a clear error.
+load with a clear error. Use provider-qualified model IDs such as
+`openai/gpt-5.4-mini`; bare model names can resolve to a different provider
+after an OpenClaw update.
 
 When a configured route is selected, the executor records a
 `model_route_selected` session event and semantic progress row so job detail and
@@ -732,7 +734,7 @@ Example:
 {
   "intentClassifier": {
     "enabled": true,
-    "model": "gpt-5.4-mini",
+    "model": "openai/gpt-5.4-mini",
     "thinking": "low",
     "minConfidence": 0.75,
     "onlyWhenParserDefaulted": true,
@@ -767,7 +769,7 @@ The classifier runs before policy decision mapping, but it does not grant trust 
     "minConfidence": 0.5,
     "autoApproveConfidence": 0.8,
     "maxEventsPerRun": 10,
-    "model": "gpt-5.4-mini",
+    "model": "openai/gpt-5.4-mini",
     "thinking": "low"
   }
 }

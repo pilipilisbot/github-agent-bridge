@@ -518,7 +518,7 @@ work agents. Configure it in `policy.json`:
 ```json
 {
   "feedbackLearning": {
-    "model": "gpt-5.4-mini",
+    "model": "openai/gpt-5.4-mini",
     "thinking": "low",
     "sessionId": "github-agent-bridge-feedback"
   }
@@ -544,17 +544,17 @@ to move low-risk actions to lighter models without changing implementation jobs:
   "modelRoutes": {
     "byAction": {
       "sync_after_merge": {
-        "model": "gpt-5.4-mini",
+        "model": "openai/gpt-5.4-mini",
         "thinking": "low"
       },
       "workflow_run_failed": {
-        "model": "gpt-5.4-mini",
+        "model": "openai/gpt-5.4-mini",
         "thinking": "medium"
       }
     },
     "byIntent": {
       "review_only": {
-        "model": "gpt-5.4-mini",
+        "model": "openai/gpt-5.4-mini",
         "thinking": "medium"
       }
     }
