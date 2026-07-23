@@ -559,7 +559,7 @@ class OpenClawDispatcher:
             if fresh_session
             else session_key_for_work(job.work_key)
         )
-        if job.work_intent == "work_allowed":
+        if fresh_session or job.work_intent == "work_allowed":
             default_session_id = session_id_for_job_attempt(job.id, job.attempts)
             session_id = normalize_session_id(default_session_id)
         else:

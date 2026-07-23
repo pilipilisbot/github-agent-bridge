@@ -94,14 +94,16 @@ def test_work_allowed_dispatch_uses_fresh_session_id_per_job_attempt_with_stable
     assert second.command[second.command.index("--session-key") + 1] == retry.command[retry.command.index("--session-key") + 1]
 
 
-def test_compaction_retry_uses_fresh_session_key():
+def test_compaction_retry_uses_fresh_session_key_and_id_for_review_only_work():
     dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
-    job = make_job(job_id=2, attempts=2)
+    job = make_job("review_only", job_id=2, attempts=2)
+    job.metadata["openclaw_session_id"] = "github-agent-bridge-job-2"
     job.metadata["fresh_session_on_retry"] = True
 
     result = dispatcher.dispatch(job, Policy(trusted_orgs={"gisce"}), reaction_ok=True)
 
     assert result.command
+    assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
     assert result.command[result.command.index("--session-key") + 1] == (
         "github-agent-bridge:gisce-erp-1:fresh:2:attempt:2"
     )
