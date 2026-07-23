@@ -528,7 +528,7 @@ def test_transient_dispatch_failure_blocks_after_retry_budget(tmp_path):
     assert "codex app-server client closed" in stored.last_error
 
 
-def test_dispatch_failure_after_visible_followup_is_done(tmp_path):
+def test_dispatch_failure_after_visible_followup_is_blocked_without_retry(tmp_path):
     queue = JobQueue(tmp_path / "bridge.sqlite3")
     job = enqueue_pr_comment(queue)
     dispatcher = RecordingDispatcher(
@@ -543,8 +543,11 @@ def test_dispatch_failure_after_visible_followup_is_done(tmp_path):
 
     stored = queue.get(job.id)
     assert stored is not None
-    assert stored.status == "done"
-    assert stored.last_error is None
+    assert stored.status == "blocked"
+    assert stored.attempts == 1
+    assert "followup_url=https://github.com/gisce/erp/issues/27315#issuecomment-2" in stored.last_error
+    assert "dispatch failed rc=1" in stored.last_error
+    assert "CLI transcript compaction failed" in stored.last_error
 
 
 def test_non_actionable_review_reacts_without_dispatch_even_when_assigned(tmp_path):
