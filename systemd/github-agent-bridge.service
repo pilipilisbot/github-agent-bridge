@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 Environment=GITHUB_AGENT_BRIDGE_MODE=shadow
 Environment=GITHUB_AGENT_BRIDGE_WORKERS=4
+Environment=GITHUB_AGENT_BRIDGE_WORK_INTENT=all
 Environment=GITHUB_AGENT_BRIDGE_REVIEW_TIMEOUT=900
 Environment=GITHUB_AGENT_BRIDGE_WORK_TIMEOUT=7200
 Environment=GITHUB_AGENT_BRIDGE_OPENCLAW_BIN=openclaw
@@ -20,6 +21,7 @@ ExecStart=%h/.local/bin/github-agent-bridge \
   run \
   --mode ${GITHUB_AGENT_BRIDGE_MODE} \
   --workers ${GITHUB_AGENT_BRIDGE_WORKERS} \
+  --work-intent ${GITHUB_AGENT_BRIDGE_WORK_INTENT} \
   --review-timeout ${GITHUB_AGENT_BRIDGE_REVIEW_TIMEOUT} \
   --work-timeout ${GITHUB_AGENT_BRIDGE_WORK_TIMEOUT} \
   --openclaw-bin ${GITHUB_AGENT_BRIDGE_OPENCLAW_BIN} \

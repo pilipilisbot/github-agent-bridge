@@ -313,6 +313,13 @@ For PR review/discussion follow-ups, the bridge classifies the work intent as `r
 
 Do not treat `review_only` as an automatic role downgrade to `reviewer`. `owner` + `review_only` is valid and means: review with owner-level judgment, explain why yes/why no, and push back when needed, but do not modify code, commit, push, or update PR metadata.
 
+Executor `--work-intent` filters use this stored work intent when claiming jobs.
+They do not reclassify notifications, grant write permission, or change the
+agent prompt. A `review_only` worker can only claim queued `review_only` jobs, a
+`work_allowed` worker can only claim queued implementation jobs, and an
+unfiltered worker can claim either. See `docs/operations.md` for production
+topologies.
+
 Precedence:
 
 1. `repoRoles[owner/repo]`
