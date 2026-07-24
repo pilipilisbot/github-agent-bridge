@@ -117,13 +117,13 @@ The bridge is conservative by default. `policy.json` decides what is trusted, wh
   "modelRoutes": {
     "byIntent": {
       "review_only": {
-        "model": "gpt-5.4-mini",
+        "model": "openai/gpt-5.4-mini",
         "thinking": "medium"
       }
     },
     "byAction": {
       "sync_after_merge": {
-        "model": "gpt-5.4-mini",
+        "model": "openai/gpt-5.4-mini",
         "thinking": "low"
       }
     }

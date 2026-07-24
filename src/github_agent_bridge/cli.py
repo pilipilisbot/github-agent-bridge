@@ -305,6 +305,8 @@ def cmd_update(args: argparse.Namespace) -> int:
             run_migrations=not args.skip_migrations,
             run_systemd=not args.skip_systemd_actions,
             run_postchecks=not args.skip_postchecks,
+            policy_path=args.policy,
+            openclaw_bin=args.openclaw_bin,
         )
     if args.record:
         payload["state"] = record_update_plan(args.db, plan)
@@ -364,6 +366,7 @@ def cmd_feedback_learn(args: argparse.Namespace) -> int:
         auto_approve_confidence=args.auto_approve_confidence if args.auto_approve_confidence is not None else policy.feedback_learning.auto_approve_confidence,
         timeout=args.timeout,
         prompt_template=feedback.load_prompt_override(classifier_override) if classifier_override else None,
+        fallback_to_default_model=policy.feedback_learning.fallback_to_default_model,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -480,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--install-command", default=os.getenv("GITHUB_AGENT_BRIDGE_AUTOUPDATE_INSTALL_COMMAND"), help="override the package install command used by --apply")
     s.add_argument("--backup-dir", default=os.getenv("GITHUB_AGENT_BRIDGE_AUTOUPDATE_BACKUP_DIR"), help="directory for SQLite backups before migration updates")
     s.add_argument("--systemctl-bin", default=os.getenv("GITHUB_AGENT_BRIDGE_SYSTEMCTL_BIN", "systemctl"))
+    s.add_argument("--openclaw-bin", default=os.getenv("GITHUB_AGENT_BRIDGE_OPENCLAW_BIN", "openclaw"))
     s.add_argument("--skip-install", action="store_true", help="with --apply, run service actions without installing the target package")
     s.add_argument("--skip-migrations", action="store_true", help="with --apply, skip SQLite schema initialization after a migration-tagged install")
     s.add_argument("--skip-systemd-actions", action="store_true", help="with --apply, install the package without running systemd actions")

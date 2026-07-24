@@ -88,7 +88,7 @@ def test_policy_allows_explicit_empty_bot_logins(tmp_path):
 
 def test_policy_from_file_loads_feedback_learning(tmp_path):
     policy_file = tmp_path / "policy.json"
-    policy_file.write_text('{"feedbackLearning": {"enabled": false, "minConfidence": 0.7, "autoApproveConfidence": 0.9, "maxEventsPerRun": 3, "model": "test-model", "thinking": "medium", "sessionId": "feedback-test"}}')
+    policy_file.write_text('{"feedbackLearning": {"enabled": false, "minConfidence": 0.7, "autoApproveConfidence": 0.9, "maxEventsPerRun": 3, "model": "test-model", "thinking": "medium", "sessionId": "feedback-test", "fallbackToDefaultModel": false}}')
 
     policy = Policy.from_file(policy_file)
 
@@ -99,6 +99,7 @@ def test_policy_from_file_loads_feedback_learning(tmp_path):
     assert policy.feedback_learning.model == "test-model"
     assert policy.feedback_learning.thinking == "medium"
     assert policy.feedback_learning.session_id == "feedback-test"
+    assert policy.feedback_learning.fallback_to_default_model is False
 
 
 def test_policy_from_file_loads_intent_classifier(tmp_path):
@@ -154,6 +155,9 @@ def test_policy_from_file_loads_model_routes_and_resolution_order(tmp_path):
             "byAction": {
               "sync_after_merge": {"model": "openai/gpt-5.4-mini", "thinking": "low"}
             },
+            "byComplexity": {
+              "mechanical": {"model": "global-mechanical", "thinking": "low"}
+            },
             "byRepo": {
               "GISCE/ERP": {
                 "default": {"model": "repo-default", "thinking": "high"},
@@ -162,6 +166,9 @@ def test_policy_from_file_loads_model_routes_and_resolution_order(tmp_path):
                 },
                 "byAction": {
                   "sync_after_merge": {"model": "repo-sync", "thinking": "minimal"}
+                },
+                "byComplexity": {
+                  "mechanical": {"model": "repo-mechanical", "thinking": "low"}
                 }
               }
             }
@@ -183,6 +190,10 @@ def test_policy_from_file_loads_model_routes_and_resolution_order(tmp_path):
     assert route.model == "repo-default"
     assert route.thinking == "high"
 
+    route = policy.model_route_for("gisce/erp", "reply_comment", "work_allowed", "mechanical")
+    assert route.model == "repo-mechanical"
+    assert route.thinking == "low"
+
     route = policy.model_route_for("other/repo", "sync_after_merge", "work_allowed")
     assert route.model == "openai/gpt-5.4-mini"
     assert route.thinking == "low"
@@ -195,6 +206,10 @@ def test_policy_from_file_loads_model_routes_and_resolution_order(tmp_path):
     assert route.model == "openai/gpt-5.5"
     assert route.thinking == "medium"
 
+    route = policy.model_route_for("other/repo", "reply_comment", "work_allowed", "mechanical")
+    assert route.model == "global-mechanical"
+    assert route.thinking == "low"
+
 
 def test_policy_from_file_rejects_invalid_model_route_thinking(tmp_path):
     policy_file = tmp_path / "policy.json"
@@ -206,6 +221,20 @@ def test_policy_from_file_rejects_invalid_model_route_thinking(tmp_path):
         assert "modelRoutes.byAction.sync_after_merge.thinking" in str(exc)
     else:
         raise AssertionError("expected ValueError for invalid model route thinking")
+
+
+def test_policy_from_file_rejects_unknown_model_route_complexity(tmp_path):
+    policy_file = tmp_path / "policy.json"
+    policy_file.write_text(
+        '{"modelRoutes": {"byComplexity": {"easy": {"model": "cheap"}}}}'
+    )
+
+    try:
+        Policy.from_file(policy_file)
+    except ValueError as exc:
+        assert "unknown complexity" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for unknown model route complexity")
 
 
 def test_policy_from_file_rejects_invalid_feedback_learning_confidence(tmp_path):

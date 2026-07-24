@@ -94,6 +94,21 @@ def test_work_allowed_dispatch_uses_fresh_session_id_per_job_attempt_with_stable
     assert second.command[second.command.index("--session-key") + 1] == retry.command[retry.command.index("--session-key") + 1]
 
 
+def test_compaction_retry_uses_fresh_session_key_and_id_for_review_only_work():
+    dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
+    job = make_job("review_only", job_id=2, attempts=2)
+    job.metadata["openclaw_session_id"] = "github-agent-bridge-job-2"
+    job.metadata["fresh_session_on_retry"] = True
+
+    result = dispatcher.dispatch(job, Policy(trusted_orgs={"gisce"}), reaction_ok=True)
+
+    assert result.command
+    assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
+    assert result.command[result.command.index("--session-key") + 1] == (
+        "github-agent-bridge:gisce-erp-1:fresh:2:attempt:2"
+    )
+
+
 def test_work_allowed_dispatch_ignores_legacy_session_id_metadata():
     dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
     policy = Policy(trusted_orgs={"gisce"})
@@ -143,6 +158,28 @@ def test_dispatch_adds_configured_model_route_to_command():
     )
 
     result = dispatcher.dispatch(make_job(), policy, reaction_ok=True)
+
+    assert result.command
+    assert result.command[result.command.index("--model") + 1] == "openai/gpt-5.4-mini"
+    assert result.command[result.command.index("--thinking") + 1] == "low"
+
+
+def test_dispatch_uses_classifier_complexity_model_route():
+    dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
+    policy = Policy(
+        trusted_orgs={"gisce"},
+        model_routes=ModelRoutes(
+            by_complexity={
+                "mechanical": ModelRoute(model="openai/gpt-5.4-mini", thinking="low")
+            }
+        ),
+    )
+    job = make_job()
+    job.metadata["intent_classifier"] = {
+        "llm": {"applied": True, "complexity": "mechanical"}
+    }
+
+    result = dispatcher.dispatch(job, policy, reaction_ok=True)
 
     assert result.command
     assert result.command[result.command.index("--model") + 1] == "openai/gpt-5.4-mini"
