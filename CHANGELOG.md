@@ -2,6 +2,34 @@
 
 <!-- version list -->
 
+## v0.57.0 (2026-07-24)
+
+### Bug Fixes
+
+- Distinguish failed partial results from blocked jobs
+  ([`cd3b640`](https://github.com/pilipilisbot/github-agent-bridge/commit/cd3b6409b32391ab2e9051b1c848ad781f790e93))
+
+- Isolate rescued review sessions
+  ([`c336d08`](https://github.com/pilipilisbot/github-agent-bridge/commit/c336d082391d2b46ff53b0b79315d83dfb86e7a5))
+
+- Keep failed dispatches blocked after follow-up
+  ([`62dc485`](https://github.com/pilipilisbot/github-agent-bridge/commit/62dc485e393bc2848ee0f5635e68c3e15207b602))
+
+- Pin model routes to explicit providers
+  ([`aaa2c70`](https://github.com/pilipilisbot/github-agent-bridge/commit/aaa2c70916edbd3e754e5b675eb068db9bff915b))
+
+- Record rescued review session attempts
+  ([`f883a34`](https://github.com/pilipilisbot/github-agent-bridge/commit/f883a34930c2b8e2bafe31013f847e38ff865e91))
+
+### Features
+
+- Add resilient cost-aware model routing
+  ([`1adec2a`](https://github.com/pilipilisbot/github-agent-bridge/commit/1adec2a61be90189c9ce816163583ecfe7f8f192))
+
+- Let feedback learning fail closed on model routing
+  ([`d28ef61`](https://github.com/pilipilisbot/github-agent-bridge/commit/d28ef61755514007c3f070ae2db6ca34c454f3b5))
+
+
 ## v0.56.0 (2026-07-17)
 
 ### Features
