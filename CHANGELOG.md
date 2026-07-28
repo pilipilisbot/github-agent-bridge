@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.57.3 (2026-07-28)
+
+### Bug Fixes
+
+- **dashboard**: Show active filters when collapsed
+  ([`da8c1a1`](https://github.com/pilipilisbot/github-agent-bridge/commit/da8c1a1359048501c71fe1d15d32a15c26a31693))
+
+
 ## v0.57.2 (2026-07-28)
 
 ### Bug Fixes

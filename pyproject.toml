@@ -1,6 +1,6 @@
 [project]
 name = "github-agent-bridge"
-version = "0.57.2"
+version = "0.57.3"
 description = "GitHub notification to OpenClaw agent bridge for Pilipilis"
 readme = "README.md"
 requires-python = ">=3.11"
