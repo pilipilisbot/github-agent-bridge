@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.57.2 (2026-07-28)
+
+### Bug Fixes
+
+- Harden sqlite queue path handling
+  ([`b0a2283`](https://github.com/pilipilisbot/github-agent-bridge/commit/b0a22832453d01131d35b1aa101234d11b9cca9c))
+
+- Initialize sqlite after state directory recovery
+  ([`4a192e8`](https://github.com/pilipilisbot/github-agent-bridge/commit/4a192e8a8437989d56441f372203cc333928f90e))
+
+
 ## v0.57.1 (2026-07-28)
 
 ### Bug Fixes
