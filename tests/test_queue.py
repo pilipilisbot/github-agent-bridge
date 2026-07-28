@@ -1,3 +1,5 @@
+import sqlite3
+
 from github_agent_bridge.models import Notification
 from github_agent_bridge.intent_classifier import IntentClassification
 from github_agent_bridge.policy import FeedbackLearning, IntentClassifier, Policy
@@ -22,6 +24,30 @@ def intent_policy(**kwargs):
         bot_logins={"pilipilisbot"},
         intent_classifier=IntentClassifier(enabled=True, model="gpt-5.4-mini", **kwargs),
     )
+
+
+def test_queue_expands_user_in_db_path(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    JobQueue("~/state/q.sqlite3")
+
+    assert (home / "state" / "q.sqlite3").exists()
+    assert not (tmp_path / "~").exists()
+
+
+def test_connect_recreates_missing_parent_directory(tmp_path):
+    q = JobQueue(tmp_path / "missing" / "q.sqlite3")
+    for child in q.path.parent.iterdir():
+        child.unlink()
+    q.path.parent.rmdir()
+
+    assert q.claim_next("worker") is None
+    with sqlite3.connect(q.path) as con:
+        assert con.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='jobs'"
+        ).fetchone()[0] == 1
 
 
 def test_enqueue_and_coalesce_same_work_key(tmp_path, monkeypatch):
