@@ -13,6 +13,9 @@ from typing import Any
 from .models import GitHubContext, Notification
 
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\])?$")
+ISSUE_EVENT_URL_RE = re.compile(
+    r"https://github\.com/([^/]+/[^/]+)/(?:issues|pull)/(\d+)#event-(\d+)"
+)
 RESERVED_SENDERS = {"github", "notifications"}
 
 
@@ -60,7 +63,12 @@ def trigger_actor_from_notification(notification: Notification) -> str | None:
 
 
 def actor_details_from_github_payload(payload: dict[str, Any]) -> TriggerActor | None:
-    for key in ("user", "actor", "sender"):
+    actor_keys = (
+        ("assigner", "actor", "user", "sender")
+        if payload.get("event") in {"assigned", "unassigned"}
+        else ("user", "actor", "sender")
+    )
+    for key in actor_keys:
         value = payload.get(key)
         if isinstance(value, dict):
             login = normalize_github_login(value.get("login"))
@@ -94,6 +102,10 @@ def actor_endpoint(ctx: GitHubContext) -> str | None:
     if ctx.workflow_run_id:
         return f"repos/{ctx.repo}/actions/runs/{ctx.workflow_run_id}"
     if ctx.issue_number:
+        for url in ctx.urls:
+            event = ISSUE_EVENT_URL_RE.search(url)
+            if event and event.group(1).lower() == ctx.repo.lower() and int(event.group(2)) == ctx.issue_number:
+                return f"repos/{ctx.repo}/issues/events/{event.group(3)}"
         return f"repos/{ctx.repo}/issues/{ctx.issue_number}"
     return None
 

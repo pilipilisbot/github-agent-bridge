@@ -57,8 +57,38 @@ def test_actor_details_from_github_payload_accepts_github_app_bot_login():
     assert actor.user_id == 946600
 
 
+def test_actor_details_from_assignment_event_uses_assigner():
+    actor = actor_details_from_github_payload(
+        {
+            "event": "assigned",
+            "actor": {"login": "giscebot", "id": 286264155},
+            "assignee": {"login": "giscebot", "id": 286264155},
+            "assigner": {
+                "login": "ecarreras",
+                "id": 294235,
+                "avatar_url": "https://avatars.githubusercontent.com/u/294235?v=4",
+            },
+        }
+    )
+
+    assert actor is not None
+    assert actor.login == "ecarreras"
+    assert actor.avatar_url == "https://avatars.githubusercontent.com/u/294235?v=4"
+    assert actor.user_id == 294235
+
+
 def test_actor_endpoint_prefers_exact_trigger_resource():
     assert actor_endpoint(GitHubContext(urls=[], repo="gisce/erp", issue_number=1, comment_id=99)) == "repos/gisce/erp/issues/comments/99"
+    assert (
+        actor_endpoint(
+            GitHubContext(
+                urls=["https://github.com/gisce/erp/issues/1#event-28540136634"],
+                repo="gisce/erp",
+                issue_number=1,
+            )
+        )
+        == "repos/gisce/erp/issues/events/28540136634"
+    )
     assert actor_endpoint(GitHubContext(urls=[], repo="gisce/erp", issue_number=1)) == "repos/gisce/erp/issues/1"
 
 
