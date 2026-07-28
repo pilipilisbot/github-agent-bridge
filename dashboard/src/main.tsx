@@ -778,6 +778,17 @@ function hasActiveJobFilters(filters: JobFilters) {
   return Object.values(filters).some((value) => value.trim() !== "");
 }
 
+function activeJobFilterChips(filters: JobFilters) {
+  return [
+    { key: "status", label: "Status", value: filters.status },
+    { key: "repo", label: "Repo", value: filters.repo },
+    { key: "thread", label: "Thread", value: filters.thread },
+    { key: "action", label: "Action", value: filters.action },
+    { key: "actor", label: "Actor", value: filters.actor.trim() ? `@${filters.actor.trim().replace(/^@/, "")}` : "" },
+    { key: "intent", label: "Intent", value: filters.intent },
+  ].filter((chip) => chip.value.trim() !== "");
+}
+
 function App() {
   const queryClient = useQueryClient();
   const [filters, setFilters] = React.useState<JobFilters>(emptyJobFilters);
@@ -2427,6 +2438,7 @@ function Metric({ title, value, icon }: { title: string; value: number; icon: Re
 function Filters({ filters, actorOptions, onChange }: { filters: JobFilters; actorOptions: JobActor[]; onChange: (filters: JobFilters) => void }) {
   const [draft, setDraft] = React.useState(filters);
   React.useEffect(() => setDraft(filters), [filters]);
+  const activeChips = activeJobFilterChips(filters);
   const canClear = hasActiveJobFilters(filters) || hasActiveJobFilters(draft);
   const clearFilters = () => {
     setDraft(emptyJobFilters);
@@ -2435,12 +2447,40 @@ function Filters({ filters, actorOptions, onChange }: { filters: JobFilters; act
 
   return (
     <details className="my-3 rounded-md border border-border bg-slate-50/70">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-semibold marker:hidden">
-        <span className="inline-flex items-center gap-2">
-          <Filter className="h-4 w-4 text-muted" aria-hidden />
-          Filters
+      <summary className="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-sm font-semibold marker:hidden">
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="inline-flex shrink-0 items-center gap-2">
+            <Filter className="h-4 w-4 text-muted" aria-hidden />
+            Filters
+          </span>
+          {activeChips.length > 0 ? (
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label="Applied filters">
+              {activeChips.map((chip) => (
+                <span key={chip.key} className="inline-flex max-w-full items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                  <span className="text-blue-700/70">{chip.label}</span>
+                  <span className="max-w-40 truncate font-mono">{chip.value.trim()}</span>
+                </span>
+              ))}
+            </span>
+          ) : null}
         </span>
-        <ChevronDown className="h-4 w-4 text-muted" aria-hidden />
+        <span className="inline-flex shrink-0 items-center gap-2">
+          {canClear ? (
+            <button
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs font-semibold text-foreground hover:bg-slate-50"
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                clearFilters();
+              }}
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+              Clear filters
+            </button>
+          ) : null}
+          <ChevronDown className="h-4 w-4 text-muted" aria-hidden />
+        </span>
       </summary>
       <form
         className="grid gap-3 border-t border-border bg-white p-3 md:grid-cols-3 xl:grid-cols-9"
