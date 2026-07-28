@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.57.1 (2026-07-28)
+
+### Bug Fixes
+
+- Resolve assignment events to their assigner
+  ([`516a053`](https://github.com/pilipilisbot/github-agent-bridge/commit/516a0539f7017b0a00fa31e0b427b7c2cded6a68))
+
+### Documentation
+
+- Explain intent-specific worker pools
+  ([`4475616`](https://github.com/pilipilisbot/github-agent-bridge/commit/447561689a2039e27470f3d1ba49ae37e901610c))
+
+
 ## v0.57.0 (2026-07-24)
 
 ### Bug Fixes
