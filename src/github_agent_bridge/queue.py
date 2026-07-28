@@ -33,9 +33,13 @@ class JobQueue:
 
     def connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        initialize = not self.path.exists()
         con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
+        if initialize:
+            con.executescript(SCHEMA)
+            self._ensure_columns(con)
         return con
 
     def init(self) -> None:

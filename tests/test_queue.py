@@ -1,3 +1,5 @@
+import sqlite3
+
 from github_agent_bridge.models import Notification
 from github_agent_bridge.intent_classifier import IntentClassification
 from github_agent_bridge.policy import FeedbackLearning, IntentClassifier, Policy
@@ -36,13 +38,16 @@ def test_queue_expands_user_in_db_path(tmp_path, monkeypatch):
 
 
 def test_connect_recreates_missing_parent_directory(tmp_path):
-    q = object.__new__(JobQueue)
-    q.path = tmp_path / "missing" / "q.sqlite3"
+    q = JobQueue(tmp_path / "missing" / "q.sqlite3")
+    for child in q.path.parent.iterdir():
+        child.unlink()
+    q.path.parent.rmdir()
 
-    with q.connect() as con:
-        con.execute("SELECT 1")
-
-    assert q.path.exists()
+    assert q.claim_next("worker") is None
+    with sqlite3.connect(q.path) as con:
+        assert con.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='jobs'"
+        ).fetchone()[0] == 1
 
 
 def test_enqueue_and_coalesce_same_work_key(tmp_path, monkeypatch):
