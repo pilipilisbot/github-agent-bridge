@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -907,6 +907,36 @@ describe("actor filter", () => {
 });
 
 describe("job filters", () => {
+  it("shows applied filters while collapsed and clears them without expanding", async () => {
+    const user = userEvent.setup();
+    let filters = {
+      status: "pending",
+      repo: "pilipilisbot/github-agent-bridge",
+      thread: "164",
+      action: "open_issue",
+      intent: "work_allowed",
+      actor: "ecarreras",
+    };
+    const onChange = vi.fn((nextFilters: typeof filters) => {
+      filters = nextFilters;
+      rerender(<Filters filters={filters} actorOptions={[]} onChange={onChange} />);
+    });
+    const { rerender } = render(<Filters filters={filters} actorOptions={[]} onChange={onChange} />);
+
+    const appliedFilters = within(screen.getByLabelText("Applied filters"));
+    expect(appliedFilters.getByText("Status")).toBeInTheDocument();
+    expect(appliedFilters.getByText("pending")).toBeInTheDocument();
+    expect(appliedFilters.getByText("Repo")).toBeInTheDocument();
+    expect(appliedFilters.getByText("pilipilisbot/github-agent-bridge")).toBeInTheDocument();
+    expect(appliedFilters.getByText("@ecarreras")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(onChange).toHaveBeenLastCalledWith({ status: "", repo: "", thread: "", action: "", intent: "", actor: "" });
+    expect(screen.queryByLabelText("Applied filters")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
   it("clears all applied filter fields at once", async () => {
     const user = userEvent.setup();
     let filters = {
