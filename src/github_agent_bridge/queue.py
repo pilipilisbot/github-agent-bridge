@@ -169,6 +169,7 @@ class JobQueue:
             if not row:
                 con.commit(); return None
             metadata = json.loads(row["metadata_json"] or "{}")
+            metadata.pop("runtime_process", None)
             fresh_session = bool(metadata.get("fresh_session_on_retry")) and int(row["attempts"]) > 0
             if fresh_session or row["work_intent"] == "work_allowed":
                 metadata["openclaw_session_id"] = session_id_for_job_attempt(int(row["id"]), int(row["attempts"]) + 1)
@@ -183,6 +184,80 @@ class JobQueue:
             self._progress(con, row["id"], row["work_key"], "semantic", "claimed", f"claimed by {worker_id}", None)
             con.commit()
             return self.get(int(row["id"]))
+
+    def register_runtime_process(
+        self,
+        job_id: int,
+        worker_id: str,
+        executor_id: str,
+        identity: dict[str, int],
+    ) -> bool:
+        """Persist the exact process that owns a running job."""
+        now = utc_now()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT work_key, metadata_json FROM jobs WHERE id=? AND status='running' AND locked_by=?",
+                (job_id, worker_id),
+            ).fetchone()
+            if row is None:
+                con.commit()
+                return False
+            metadata = json.loads(row["metadata_json"] or "{}")
+            runtime_process = {
+                "state": "running",
+                "executor_id": executor_id,
+                "worker_id": worker_id,
+                "pid": int(identity["pid"]),
+                "ppid": int(identity["ppid"]),
+                "pgid": int(identity["pgid"]),
+                "sid": int(identity["sid"]),
+                "start_time_ticks": int(identity["start_time_ticks"]),
+                "registered_at": now,
+            }
+            metadata["runtime_process"] = runtime_process
+            con.execute(
+                "UPDATE jobs SET metadata_json=?, updated_at=? WHERE id=? AND status='running' AND locked_by=?",
+                (json.dumps(metadata, sort_keys=True), now, job_id, worker_id),
+            )
+            self._session_event(
+                con,
+                job_id,
+                row["work_key"],
+                str(metadata.get("openclaw_session_id") or session_id_for_job(job_id)),
+                "process_registered",
+                f"runtime process {runtime_process['pid']} registered",
+                json.dumps(runtime_process, sort_keys=True),
+            )
+            con.commit()
+            return True
+
+    def mark_runtime_process_exited(self, job_id: int, worker_id: str) -> bool:
+        """Mark a registered process as exited while result handling finishes."""
+        now = utc_now()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT metadata_json FROM jobs WHERE id=? AND status='running' AND locked_by=?",
+                (job_id, worker_id),
+            ).fetchone()
+            if row is None:
+                con.commit()
+                return False
+            metadata = json.loads(row["metadata_json"] or "{}")
+            runtime_process = metadata.get("runtime_process")
+            if not isinstance(runtime_process, dict):
+                con.commit()
+                return False
+            runtime_process["state"] = "exited"
+            runtime_process["exited_at"] = now
+            metadata["runtime_process"] = runtime_process
+            cur = con.execute(
+                "UPDATE jobs SET metadata_json=?, updated_at=? WHERE id=? AND status='running' AND locked_by=?",
+                (json.dumps(metadata, sort_keys=True), now, job_id, worker_id),
+            )
+            con.commit()
+            return bool(cur.rowcount)
 
     def finish(self, job_id: int, status: str, summary: str, detail: str | None = None) -> None:
         now = utc_now()

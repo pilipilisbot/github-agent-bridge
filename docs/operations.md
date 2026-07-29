@@ -281,6 +281,17 @@ The alert wrapper uses the same composite stalled-job alert before automatic
 unlock or child termination. It does not unlock every old running job; it passes
 only the job ids that the monitor flagged as stalled.
 
+Each live dispatch also records its executor generation, worker id, root PID,
+parent PID, process group/session ids, and Linux process start time in the job
+metadata. The start time prevents PID reuse from making a dead job look alive.
+When the monitor finds a running job whose registered root process is dead,
+reparented, reused, or owned by another executor generation, it restarts the
+complete executor systemd cgroup and leaves the affected work blocked. This
+restart is deliberately broader than `killpg`: tools may create new process
+groups or sessions, but they remain in the service cgroup and are therefore
+terminated together. `KillMode=control-group` and `TimeoutStopSec=30s` in the
+executor unit make that cleanup explicit.
+
 Set `GITHUB_AGENT_BRIDGE_KILL_STALE_CHILDREN=1` in the private systemd env file
 to let `github-agent-bridge-monitor-alert` terminate stale executor child
 process groups before retrying stalled jobs. The wrapper samples every direct

@@ -30,6 +30,12 @@ ExecStart=%h/.local/bin/github-agent-bridge \
   --to ${GITHUB_AGENT_BRIDGE_DEFAULT_TO}
 Restart=on-failure
 RestartSec=10
+# Every process spawned by a job stays in this cgroup even if it reparents or
+# creates a new process group/session. Stopping/restarting the executor must
+# therefore terminate the complete tree, not only the Python main process.
+KillMode=control-group
+SendSIGKILL=yes
+TimeoutStopSec=30s
 
 [Install]
 WantedBy=default.target

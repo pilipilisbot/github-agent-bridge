@@ -32,7 +32,10 @@ def process_stat(pid: int, proc_root: Path = PROC_ROOT) -> dict[str, Any] | None
         return {
             "state": fields[0],
             "ppid": int(fields[1]),
+            "pgid": int(fields[2]),
+            "sid": int(fields[3]),
             "cpu_ticks": int(fields[11]) + int(fields[12]),
+            "start_time_ticks": int(fields[19]),
         }
     except (IndexError, ValueError):
         return None
@@ -77,7 +80,10 @@ def inspect_process(pid: int, proc_root: Path = PROC_ROOT, *, include_children: 
     sample: dict[str, Any] = {
         "pid": pid,
         "ppid": stat["ppid"],
+        "pgid": stat["pgid"],
+        "sid": stat["sid"],
         "state": stat["state"],
+        "start_time_ticks": stat["start_time_ticks"],
         "cmd": process_cmd(pid, proc_root=proc_root),
         "cpu_ticks": stat["cpu_ticks"],
         "io_bytes": process_io(pid, proc_root=proc_root),
@@ -99,3 +105,19 @@ def direct_children(pid: int, proc_root: Path = PROC_ROOT) -> list[dict[str, Any
         for child_pid in direct_child_pids(pid, proc_root=proc_root)
         if (child := inspect_process(child_pid, proc_root=proc_root, include_children=True)) is not None
     ]
+
+
+def process_identity_matches(
+    pid: int,
+    start_time_ticks: int,
+    *,
+    expected_ppid: int | None = None,
+    proc_root: Path = PROC_ROOT,
+) -> bool:
+    """Return true only for the same live process, not a reused PID."""
+    stat = process_stat(pid, proc_root=proc_root)
+    if stat is None or stat.get("state") == "Z":
+        return False
+    if int(stat.get("start_time_ticks") or -1) != int(start_time_ticks):
+        return False
+    return expected_ppid is None or int(stat.get("ppid") or -1) == expected_ppid

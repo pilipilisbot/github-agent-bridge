@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from github_agent_bridge.process_inspection import direct_children, inspect_process
+from github_agent_bridge.process_inspection import direct_children, inspect_process, process_identity_matches
 
 
 def write_proc(root: Path, pid: int, *, ppid: int, cmd: str, cpu_user: int = 1, cpu_system: int = 2, read_bytes: int = 3, write_bytes: int = 4) -> None:
     proc = root / str(pid)
     proc.mkdir(parents=True)
-    fields = ["S", str(ppid), "0", "0", "0", "0", "0", "0", "0", "0", "0", str(cpu_user), str(cpu_system)]
+    fields = ["S", str(ppid), str(pid), str(pid), "0", "0", "0", "0", "0", "0", "0", str(cpu_user), str(cpu_system)]
+    fields.extend(["0"] * 6)
+    fields.append(str(pid * 100))
     (proc / "stat").write_text(f"{pid} ({cmd}) {' '.join(fields)}\n", encoding="utf-8")
     (proc / "cmdline").write_bytes(cmd.encode("utf-8") + b"\0--flag")
     (proc / "io").write_text(f"read_bytes: {read_bytes}\nwrite_bytes: {write_bytes}\n", encoding="utf-8")
@@ -34,3 +36,11 @@ def test_direct_children_ignores_missing_or_unrelated_processes(tmp_path):
     write_proc(tmp_path, 22, ppid=2, cmd="other")
 
     assert [child["pid"] for child in direct_children(20, proc_root=tmp_path)] == [21]
+
+
+def test_process_identity_matches_pid_birth_and_parent(tmp_path):
+    write_proc(tmp_path, 30, ppid=10, cmd="openclaw")
+
+    assert process_identity_matches(30, 3000, expected_ppid=10, proc_root=tmp_path) is True
+    assert process_identity_matches(30, 2999, expected_ppid=10, proc_root=tmp_path) is False
+    assert process_identity_matches(30, 3000, expected_ppid=11, proc_root=tmp_path) is False

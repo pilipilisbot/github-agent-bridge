@@ -57,8 +57,18 @@ class RecordingDispatcher:
         self.returncode = returncode
         self.timed_out = timed_out
 
-    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None):
+    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None, process_callback=None):
         self.jobs.append(job)
+        if process_callback:
+            process_callback(
+                {
+                    "pid": 456,
+                    "ppid": 123,
+                    "pgid": 456,
+                    "sid": 456,
+                    "start_time_ticks": 999,
+                }
+            )
         if activity_callback:
             activity_callback("openclaw_stdout", "OpenClaw CLI output", "thinking about the change")
             activity_callback("openclaw_stderr", "OpenClaw CLI error output", "token=secret ghp_abcdefghijklmnopqrstuvwxyz")
@@ -70,7 +80,17 @@ class CancelableDispatcher:
         self.started = threading.Event()
         self.cancelled = threading.Event()
 
-    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None):
+    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None, process_callback=None):
+        if process_callback:
+            process_callback(
+                {
+                    "pid": 456,
+                    "ppid": 123,
+                    "pgid": 456,
+                    "sid": 456,
+                    "start_time_ticks": 999,
+                }
+            )
         self.started.set()
         self.cancelled.wait(timeout=5)
         return DispatchResult(False, 130, "", "executor shutdown requested", cancelled=True)
@@ -180,10 +200,19 @@ def test_executor_records_session_activity_events(tmp_path):
     assert pool.work_one("worker-test") is True
 
     event_types = [event["event_type"] for event in job_session_events(db, dispatcher.jobs[0].id)]
-    assert event_types == ["claimed", "dispatch_started", "model_route_selected", "openclaw_stdout", "openclaw_stderr", "dispatch_finished", "done"]
+    assert event_types == [
+        "claimed",
+        "dispatch_started",
+        "model_route_selected",
+        "process_registered",
+        "openclaw_stdout",
+        "openclaw_stderr",
+        "dispatch_finished",
+        "done",
+    ]
     route_event = job_session_events(db, dispatcher.jobs[0].id)[2]
     assert route_event["detail"] == "OpenClaw default model route"
-    stderr_event = job_session_events(db, dispatcher.jobs[0].id)[4]
+    stderr_event = job_session_events(db, dispatcher.jobs[0].id)[5]
     assert stderr_event["detail"] == "token=[redacted] [redacted]"
 
 

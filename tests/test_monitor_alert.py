@@ -172,6 +172,35 @@ def test_maybe_unlock_stale_blocks_jobs_when_executor_is_inactive(tmp_path, monk
     assert "unlock-stale" not in calls[0]
 
 
+def test_process_mismatch_restarts_complete_executor_cgroup_and_blocks_without_age_gate(tmp_path, monkeypatch):
+    config = make_config(tmp_path)
+    calls = []
+    monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
+
+    def fake_run(args, check=False):
+        calls.append(args)
+        if "restart" in args:
+            return type("Proc", (), {"stdout": "", "returncode": 0})()
+        return type("Proc", (), {"stdout": '{"blocked":[7],"count":1}\n', "returncode": 0})()
+
+    monkeypatch.setattr(monitor_alert, "_run", fake_run)
+    output = monitor_alert.maybe_unlock_stale(
+        config,
+        "\n".join(
+            [
+                "- [monitor.running_process_mismatch] running job 7 process ownership mismatch: PID 456 is dead",
+                "- running detail: job=7 key=owner/repo#1",
+            ]
+        ),
+    )
+
+    assert calls[0] == ["systemctl", "--user", "restart", "github-agent-bridge.service"]
+    assert "block-running" in calls[1]
+    assert calls[1][calls[1].index("--older-than") + 1] == "0"
+    assert "executor cgroup restart rc=0" in output
+    assert '"blocked":[7]' in output
+
+
 def test_sample_executor_activity_tracks_all_executor_children(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     monkeypatch.setattr(monitor_alert, "has_child_processes", lambda pid: True)

@@ -110,12 +110,21 @@ class ExecutorPool:
                     "fresh OpenClaw session selected after compaction failure",
                     f"attempt={job.attempts}",
                 )
-            result = self.dispatcher.dispatch(
-                job,
-                self.policy,
-                reaction_ok=reaction_ok,
-                activity_callback=lambda event_type, summary, detail: self.queue.add_session_event(job.id, event_type, summary, redact_event_detail(detail)),
-            )
+            try:
+                result = self.dispatcher.dispatch(
+                    job,
+                    self.policy,
+                    reaction_ok=reaction_ok,
+                    activity_callback=lambda event_type, summary, detail: self.queue.add_session_event(job.id, event_type, summary, redact_event_detail(detail)),
+                    process_callback=lambda identity: self.queue.register_runtime_process(
+                        job.id,
+                        worker_id,
+                        self.executor_id,
+                        identity,
+                    ),
+                )
+            finally:
+                self.queue.mark_runtime_process_exited(job.id, worker_id)
             dispatched = True
             dispatch_detail = "\n".join(part for part in [result.stdout, result.stderr] if part)
             self.queue.add_session_event(
@@ -282,6 +291,7 @@ class ExecutorPool:
                 "orphaned running job recovered at executor startup",
                 "No prior executor process owns this running job. It was blocked, not auto-requeued, to avoid duplicate external actions.",
             )
+            self.queue.set_state("executor_process_tracking_id", self.executor_id)
             threads = [
                 threading.Thread(target=self._loop, args=(worker_id,), daemon=False)
                 for worker_id in worker_ids

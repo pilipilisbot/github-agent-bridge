@@ -529,3 +529,34 @@ def test_block_running_can_limit_jobs_and_never_requeues(tmp_path):
     assert stored.status == "blocked"
     assert stored.locked_by is None
     assert stored.last_error == "process no longer exists; manual retry required"
+
+
+def test_runtime_process_is_bound_to_running_job_worker(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    queued, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    worker_id = "executor-123-deadbeef/worker-0"
+    claimed = q.claim_next(worker_id)
+    assert claimed is not None
+
+    assert q.register_runtime_process(
+        claimed.id,
+        worker_id,
+        "executor-123-deadbeef",
+        {"pid": 456, "ppid": 123, "pgid": 456, "sid": 456, "start_time_ticks": 999},
+    ) is True
+    assert q.register_runtime_process(
+        claimed.id,
+        "another-worker",
+        "executor-123-deadbeef",
+        {"pid": 789, "ppid": 123, "pgid": 789, "sid": 789, "start_time_ticks": 1000},
+    ) is False
+
+    runtime = q.get(queued.id).metadata["runtime_process"]
+    assert runtime["state"] == "running"
+    assert runtime["pid"] == 456
+    assert runtime["worker_id"] == worker_id
+
+    assert q.mark_runtime_process_exited(claimed.id, worker_id) is True
+    runtime = q.get(queued.id).metadata["runtime_process"]
+    assert runtime["state"] == "exited"
+    assert runtime["exited_at"].endswith("Z")

@@ -199,17 +199,22 @@ def test_live_dispatch_streams_openclaw_output_to_activity_callback(tmp_path):
     )
     openclaw.chmod(0o755)
     events = []
+    processes = []
 
     result = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1).dispatch(
         make_job(),
         Policy(trusted_orgs={"gisce"}),
         reaction_ok=True,
         activity_callback=lambda event_type, summary, detail: events.append((event_type, summary, detail)),
+        process_callback=lambda identity: processes.append(identity),
     )
 
     assert result.ok is True
     assert ("openclaw_stdout", "OpenClaw CLI output", "thinking line") in events
     assert ("openclaw_stderr", "OpenClaw CLI error output", "tool error") in events
+    assert len(processes) == 1
+    assert processes[0]["pid"] > 0
+    assert processes[0]["start_time_ticks"] > 0
 
 
 def test_live_dispatch_streams_partial_openclaw_output_before_process_exits(tmp_path, monkeypatch):

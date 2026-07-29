@@ -14,6 +14,7 @@ from typing import Callable
 from . import feedback
 from .models import GitHubContext, Job
 from .policy import DEFAULT_REPO_ROLE, Policy, Route, complexity_from_metadata
+from .process_inspection import process_stat
 from .session_correlation import (
     normalize_session_id,
     session_id_for_job,
@@ -575,6 +576,7 @@ class OpenClawDispatcher:
         policy: Policy,
         reaction_ok: bool | None = None,
         activity_callback: Callable[[str, str, str | None], None] | None = None,
+        process_callback: Callable[[dict[str, int]], bool | None] | None = None,
     ) -> DispatchResult:
         agent, channel, to = self.route_for(job, policy)
         cmd = [self.openclaw_bin, "agent"]
@@ -634,6 +636,33 @@ class OpenClawDispatcher:
                 return DispatchResult(False, 130, "", "executor shutdown requested before dispatch", False, reaction_ok, cmd, True)
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, start_new_session=True)
             self._active_processes.add(proc)
+        if process_callback:
+            stat = process_stat(proc.pid)
+            identity = {
+                "pid": proc.pid,
+                "ppid": int(stat["ppid"]) if stat else os.getpid(),
+                "pgid": int(stat["pgid"]) if stat else proc.pid,
+                "sid": int(stat["sid"]) if stat else proc.pid,
+                "start_time_ticks": int(stat["start_time_ticks"]) if stat else 0,
+            }
+            try:
+                registered = bool(stat) and process_callback(identity) is not False
+            except Exception:
+                registered = False
+            if not registered:
+                self._signal_process_group(proc, signal.SIGKILL)
+                proc.wait()
+                with self._process_lock:
+                    self._active_processes.discard(proc)
+                return DispatchResult(
+                    False,
+                    125,
+                    "",
+                    "failed to persist runtime process ownership; dispatch terminated",
+                    False,
+                    reaction_ok,
+                    cmd,
+                )
 
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []

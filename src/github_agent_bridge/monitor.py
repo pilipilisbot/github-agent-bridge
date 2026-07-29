@@ -13,7 +13,7 @@ from typing import Any
 
 from .dashboard_data import inspect_db_read_only
 from .observability import DEFAULT_PROCESS_SAMPLE_RETENTION_SECONDS, recent_process_samples, record_monitor_observation
-from .process_inspection import direct_children
+from .process_inspection import direct_children, process_identity_matches
 
 
 ALERT_RELEASE_AVAILABLE = "monitor.release_available"
@@ -23,6 +23,7 @@ ALERT_BLOCKED_JOBS = "monitor.blocked_jobs"
 ALERT_PENDING_QUEUE_OLD = "monitor.pending_queue_old"
 ALERT_EXECUTOR_SERVICE = "monitor.executor_service"
 ALERT_RUNNING_NO_EXECUTOR_CHILD = "monitor.running_no_executor_child"
+ALERT_RUNNING_PROCESS_MISMATCH = "monitor.running_process_mismatch"
 ALERT_READER_TIMER = "monitor.reader_timer"
 ALERT_READER_LAST_RESULT = "monitor.reader_last_result"
 ALERT_READER_STALE = "monitor.reader_stale"
@@ -82,6 +83,14 @@ class MonitorReport:
                 f"semantic={semantic.get('phase', '-')}/{semantic.get('age_seconds', '-')}s "
                 f"visible={visible.get('phase', '-')}/{visible.get('age_seconds', '-')}s"
             )
+            runtime = job.get("runtime_process") or {}
+            if runtime:
+                parts.append(
+                    "- runtime detail: "
+                    f"job={job.get('id')} state={runtime.get('state', '-')} "
+                    f"pid={runtime.get('pid', '-')} ppid={runtime.get('ppid', '-')} "
+                    f"pgid={runtime.get('pgid', '-')} sid={runtime.get('sid', '-')}"
+                )
         children = metrics.get("executor_children") or []
         if children:
             child_text = ", ".join(f"{child.get('pid')}:{child.get('cmd') or '-'}" for child in children[:5])
@@ -280,12 +289,18 @@ def monitor(
         if executor_state != "active":
             _add_alert(metrics, alerts, ALERT_EXECUTOR_SERVICE, f"executor service is {executor_state}")
         if metrics.get("running_jobs") and executor_state == "active" and not children:
-            _add_alert(
-                metrics,
-                alerts,
-                ALERT_RUNNING_NO_EXECUTOR_CHILD,
-                "running jobs exist but executor has no child process",
+            tracking_id = metrics.get("executor_process_tracking_id")
+            expects_live_process = not tracking_id or any(
+                (job.get("runtime_process") or {}).get("state") == "running"
+                for job in metrics.get("running_jobs", [])
             )
+            if expects_live_process:
+                _add_alert(
+                    metrics,
+                    alerts,
+                    ALERT_RUNNING_NO_EXECUTOR_CHILD,
+                    "running jobs exist but executor has no child process",
+                )
         if timer_state != "active":
             _add_alert(metrics, alerts, ALERT_READER_TIMER, f"reader timer is {timer_state}")
         if reader_result not in ("success", "unknown"):
@@ -307,6 +322,18 @@ def monitor(
                     ALERT_READER_STALE,
                     f"reader last run age {reader_age}s > {thresholds.reader_recent_seconds}s",
                 )
+
+        tracking_id = metrics.get("executor_process_tracking_id")
+        if tracking_id and executor_state == "active" and executor_pid:
+            for job in metrics.get("running_jobs", []):
+                problem = _runtime_process_problem(job, executor_pid, str(tracking_id))
+                if problem:
+                    _add_alert(
+                        metrics,
+                        alerts,
+                        ALERT_RUNNING_PROCESS_MISMATCH,
+                        f"running job {job.get('id')} process ownership mismatch: {problem}",
+                    )
 
     latest_sample = recent_process_samples(db, limit=1)
     metrics["latest_process_sample"] = latest_sample[-1] if latest_sample else None
@@ -332,6 +359,39 @@ def monitor(
         )
 
     return MonitorReport(ok=not alerts, alerts=alerts, metrics=metrics)
+
+
+def _runtime_process_problem(
+    job: dict[str, Any],
+    executor_pid: int,
+    tracking_id: str,
+    *,
+    launch_grace_seconds: int = 60,
+    exit_grace_seconds: int = 120,
+) -> str | None:
+    worker_id = str(job.get("locked_by") or "")
+    if not worker_id.startswith(f"{tracking_id}/worker-"):
+        return f"worker {worker_id or '-'} is not owned by active executor {tracking_id}"
+    runtime = job.get("runtime_process")
+    if not isinstance(runtime, dict):
+        age = int(job.get("age_seconds") or 0)
+        return None if age <= launch_grace_seconds else "runtime PID was not registered"
+    if runtime.get("executor_id") != tracking_id or runtime.get("worker_id") != worker_id:
+        return "runtime metadata does not match the job worker"
+    if runtime.get("state") == "exited":
+        idle = int(job.get("idle_seconds") or 0)
+        return None if idle <= exit_grace_seconds else "runtime exited but job did not reach a terminal state"
+    try:
+        pid = int(runtime["pid"])
+        ppid = int(runtime["ppid"])
+        start_time_ticks = int(runtime["start_time_ticks"])
+    except (KeyError, TypeError, ValueError):
+        return "runtime process identity is incomplete"
+    if ppid != executor_pid:
+        return f"runtime parent {ppid} does not match executor PID {executor_pid}"
+    if not process_identity_matches(pid, start_time_ticks, expected_ppid=executor_pid):
+        return f"PID {pid} is dead, reparented, zombie, or reused"
+    return None
 
 
 def _running_job_looks_stalled(job: dict[str, Any], metrics: dict[str, Any], thresholds: MonitorThresholds) -> bool:
