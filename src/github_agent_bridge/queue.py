@@ -222,6 +222,64 @@ class JobQueue:
                 self._log(con, job_id, row["work_key"], "retry", summary, detail)
             return bool(cur.rowcount)
 
+    def block_running(
+        self,
+        summary: str,
+        detail: str,
+        *,
+        job_ids: list[int] | None = None,
+        locked_by: set[str] | None = None,
+        older_than_seconds: int | None = None,
+    ) -> list[int]:
+        """Mark selected running jobs as blocked without requeuing them."""
+        now = utc_now()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            clauses = ["status='running'"]
+            args: list[object] = []
+            if job_ids is not None:
+                if not job_ids:
+                    con.commit()
+                    return []
+                clauses.append(f"id IN ({','.join('?' for _ in job_ids)})")
+                args.extend(job_ids)
+            if locked_by is not None:
+                if not locked_by:
+                    con.commit()
+                    return []
+                clauses.append(f"locked_by IN ({','.join('?' for _ in locked_by)})")
+                args.extend(sorted(locked_by))
+            if older_than_seconds is not None:
+                clauses.append(
+                    "started_at IS NOT NULL AND "
+                    "(julianday('now') - julianday(started_at)) * 86400 > ?"
+                )
+                args.append(older_than_seconds)
+            rows = con.execute(
+                f"SELECT id, work_key, metadata_json FROM jobs WHERE {' AND '.join(clauses)} ORDER BY id",
+                args,
+            ).fetchall()
+            blocked_ids: list[int] = []
+            for row in rows:
+                cur = con.execute(
+                    """UPDATE jobs
+                    SET status='blocked', locked_by=NULL, last_error=?,
+                        finished_at=?, updated_at=?
+                    WHERE id=? AND status='running'""",
+                    (detail, now, now, row["id"]),
+                )
+                if not cur.rowcount:
+                    continue
+                job_id = int(row["id"])
+                blocked_ids.append(job_id)
+                self._log(con, job_id, row["work_key"], "blocked", summary, detail)
+                metadata = json.loads(row["metadata_json"] or "{}")
+                session_id = str(metadata.get("openclaw_session_id") or session_id_for_job(job_id))
+                self._session_event(con, job_id, row["work_key"], session_id, "blocked", summary, detail)
+                self._progress(con, job_id, row["work_key"], "semantic", "blocked", summary, detail)
+            con.commit()
+            return blocked_ids
+
     def update_work_intent(self, job_id: int, work_intent: str, summary: str) -> Job | None:
         now = utc_now()
         with self.connect() as con:

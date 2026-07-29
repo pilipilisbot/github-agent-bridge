@@ -300,20 +300,23 @@ def running_job_ids(output: str) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def retry_jobs(config: AlertConfig, job_ids: list[str]) -> str:
-    lines = []
-    for job_id in dict.fromkeys(job_ids):
-        proc = _run([
+def block_orphaned_jobs(config: AlertConfig, job_ids: list[str], reason: str) -> str:
+    proc = _run(
+        [
             _expand(config.bridge_bin),
             "--db",
             _expand(config.db),
             "--policy",
             _expand(config.policy),
-            "retry",
-            job_id,
-        ])
-        lines.append(proc.stdout.strip())
-    return "\n".join(line for line in lines if line) + ("\n" if lines else "")
+            "block-running",
+            "--older-than",
+            str(config.auto_unlock_seconds or 0),
+            "--reason",
+            reason,
+            *(item for job_id in dict.fromkeys(job_ids) for item in ("--job-id", job_id)),
+        ]
+    )
+    return proc.stdout
 
 
 def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
@@ -322,7 +325,11 @@ def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
         return ""
     main_pid = get_main_pid()
     if not main_pid or main_pid == "0":
-        return ""
+        return block_orphaned_jobs(
+            config,
+            job_ids,
+            "The executor service is inactive and no process owns this stale running job. It was not auto-requeued.",
+        )
     child_output = ""
     if has_child_processes(main_pid):
         if not config.kill_stale_children:
@@ -334,21 +341,12 @@ def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
             return sample_output
         results = [terminate_process_group(pid, config.terminate_grace_seconds) for pid in child_pids(main_pid)]
         child_output = sample_output + "terminated stale child processes:\n" + "\n".join(results) + "\n"
-    proc = _run(
-        [
-            _expand(config.bridge_bin),
-            "--db",
-            _expand(config.db),
-            "--policy",
-            _expand(config.policy),
-            "unlock-stale",
-            "--older-than",
-            str(config.auto_unlock_seconds),
-            *(item for job_id in dict.fromkeys(job_ids) for item in ("--job-id", job_id)),
-        ]
+    blocked_output = block_orphaned_jobs(
+        config,
+        job_ids,
+        "No live executor child owns this stale running job. It was blocked after process reconciliation and not auto-requeued.",
     )
-    retry_output = retry_jobs(config, running_job_ids(output)) if child_output else ""
-    return child_output + proc.stdout + retry_output
+    return child_output + blocked_output
 
 
 def load_state(path: Path) -> tuple[str, int]:

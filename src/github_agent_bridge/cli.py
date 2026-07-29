@@ -241,6 +241,17 @@ def cmd_unlock_stale(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_block_running(args: argparse.Namespace) -> int:
+    blocked = JobQueue(args.db).block_running(
+        "orphaned running job reconciled by monitor",
+        args.reason,
+        job_ids=args.job_id,
+        older_than_seconds=args.older_than,
+    )
+    print(json.dumps({"blocked": blocked, "count": len(blocked)}, ensure_ascii=False))
+    return 0
+
+
 def cmd_backfill_trigger_actors(args: argparse.Namespace) -> int:
     result = backfill_trigger_actors(args.db, gh_bin=args.gh_bin, limit=args.limit, dry_run=args.dry_run)
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -446,6 +457,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--older-than", type=int, default=1800)
     s.add_argument("--job-id", type=int, action="append", help="only unlock a specific running job id; repeat for multiple jobs")
     s.set_defaults(func=cmd_unlock_stale)
+    s = sub.add_parser("block-running", help="mark orphaned running jobs blocked without retrying them")
+    s.add_argument("--older-than", type=int)
+    s.add_argument("--job-id", type=int, action="append", help="only block a specific running job id; repeat for multiple jobs")
+    s.add_argument(
+        "--reason",
+        default="The executor process no longer owns this job. It was blocked, not auto-requeued, to avoid duplicate external actions.",
+    )
+    s.set_defaults(func=cmd_block_running)
     s = sub.add_parser("backfill-trigger-actors", help="fill missing job trigger_actor values from stored GitHub context")
     s.add_argument("--gh-bin", default="gh")
     s.add_argument("--limit", type=int, default=None)

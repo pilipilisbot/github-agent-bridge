@@ -508,3 +508,24 @@ def test_unlock_stale_can_limit_to_selected_running_jobs(tmp_path):
 
     assert q.get(job1.id).status == "running"
     assert q.get(job2.id).status == "pending"
+
+
+def test_block_running_can_limit_jobs_and_never_requeues(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    job1, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    q.claim_next("old-worker-1")
+    job2, _ = q.enqueue(notif(2, "<2@github.com>", BODY_OTHER), policy())
+    q.claim_next("old-worker-2")
+
+    blocked = q.block_running(
+        "executor stopped",
+        "process no longer exists; manual retry required",
+        job_ids=[job2.id],
+    )
+
+    assert blocked == [job2.id]
+    assert q.get(job1.id).status == "running"
+    stored = q.get(job2.id)
+    assert stored.status == "blocked"
+    assert stored.locked_by is None
+    assert stored.last_error == "process no longer exists; manual retry required"

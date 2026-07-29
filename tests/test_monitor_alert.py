@@ -41,7 +41,7 @@ def test_load_state_accepts_legacy_shell_format(tmp_path):
     assert monitor_alert.load_state(state_file) == ("abc", 123)
 
 
-def test_maybe_unlock_stale_runs_when_executor_has_no_children(tmp_path, monkeypatch):
+def test_maybe_unlock_stale_blocks_when_executor_has_no_children(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     calls = []
     monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
@@ -49,17 +49,18 @@ def test_maybe_unlock_stale_runs_when_executor_has_no_children(tmp_path, monkeyp
 
     def fake_run(args, check=False):
         calls.append(args)
-        return type("Proc", (), {"stdout": '{"unlocked":1}\n'})()
+        return type("Proc", (), {"stdout": '{"blocked":[7],"count":1}\n'})()
 
     monkeypatch.setattr(monitor_alert, "_run", fake_run)
 
     output = monitor_alert.maybe_unlock_stale(config, "running job 7 owner/repo#1 age 1200s > 900s")
 
-    assert output == '{"unlocked":1}\n'
-    assert calls[0][-4:] == ["--older-than", "900", "--job-id", "7"]
+    assert output == '{"blocked":[7],"count":1}\n'
+    assert "block-running" in calls[0]
+    assert calls[0][-2:] == ["--job-id", "7"]
 
 
-def test_maybe_unlock_stale_runs_for_no_child_running_detail_ids(tmp_path, monkeypatch):
+def test_maybe_unlock_stale_blocks_no_child_running_detail_ids(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     calls = []
     monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
@@ -67,7 +68,7 @@ def test_maybe_unlock_stale_runs_for_no_child_running_detail_ids(tmp_path, monke
 
     def fake_run(args, check=False):
         calls.append(args)
-        return type("Proc", (), {"stdout": '{"unlocked":2}' + "\n"})()
+        return type("Proc", (), {"stdout": '{"blocked":[568,570],"count":2}' + "\n"})()
 
     monkeypatch.setattr(monitor_alert, "_run", fake_run)
 
@@ -82,8 +83,9 @@ def test_maybe_unlock_stale_runs_for_no_child_running_detail_ids(tmp_path, monke
         ),
     )
 
-    assert output == '{"unlocked":2}\n'
-    assert calls[0][-6:] == ["--older-than", "900", "--job-id", "568", "--job-id", "570"]
+    assert output == '{"blocked":[568,570],"count":2}\n'
+    assert "block-running" in calls[0]
+    assert calls[0][-4:] == ["--job-id", "568", "--job-id", "570"]
 
 
 def test_maybe_unlock_stale_uses_no_child_alert_code_for_detail_ids(tmp_path, monkeypatch):
@@ -94,7 +96,7 @@ def test_maybe_unlock_stale_uses_no_child_alert_code_for_detail_ids(tmp_path, mo
 
     def fake_run(args, check=False):
         calls.append(args)
-        return type("Proc", (), {"stdout": '{"unlocked":1}\n'})()
+        return type("Proc", (), {"stdout": '{"blocked":[568],"count":1}\n'})()
 
     monkeypatch.setattr(monitor_alert, "_run", fake_run)
 
@@ -108,11 +110,12 @@ def test_maybe_unlock_stale_uses_no_child_alert_code_for_detail_ids(tmp_path, mo
         ),
     )
 
-    assert output == '{"unlocked":1}\n'
-    assert calls[0][-4:] == ["--older-than", "900", "--job-id", "568"]
+    assert output == '{"blocked":[568],"count":1}\n'
+    assert "block-running" in calls[0]
+    assert calls[0][-2:] == ["--job-id", "568"]
 
 
-def test_maybe_unlock_stale_kills_children_and_retries_jobs_when_enabled(tmp_path, monkeypatch):
+def test_maybe_unlock_stale_kills_children_and_blocks_jobs_when_enabled(tmp_path, monkeypatch):
     base = make_config(tmp_path)
     config = monitor_alert.AlertConfig(
         bridge_bin=base.bridge_bin,
@@ -140,17 +143,33 @@ def test_maybe_unlock_stale_kills_children_and_retries_jobs_when_enabled(tmp_pat
     monkeypatch.setattr(monitor_alert, "terminate_process_group", lambda pid, grace: f"pid {pid}: killed")
 
     def fake_run(args, check=False):
-        if args[-2:] == ["retry", "7"]:
-            return type("Proc", (), {"stdout": "{\"job_id\":7,\"requeued\":true}\n"})()
-        return type("Proc", (), {"stdout": "{\"unlocked\":0}\n"})()
+        return type("Proc", (), {"stdout": "{\"blocked\":[7],\"count\":1}\n"})()
 
     monkeypatch.setattr(monitor_alert, "_run", fake_run)
 
     output = monitor_alert.maybe_unlock_stale(config, "running job 7 owner/repo#1 age 1200s > 900s")
 
     assert "pid 456: killed" in output
-    assert '{"unlocked":0}' in output
-    assert '{"job_id":7,"requeued":true}' in output
+    assert '{"blocked":[7],"count":1}' in output
+    assert "requeued" not in output
+
+
+def test_maybe_unlock_stale_blocks_jobs_when_executor_is_inactive(tmp_path, monkeypatch):
+    config = make_config(tmp_path)
+    calls = []
+    monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "0")
+
+    def fake_run(args, check=False):
+        calls.append(args)
+        return type("Proc", (), {"stdout": '{"blocked":[7],"count":1}\n'})()
+
+    monkeypatch.setattr(monitor_alert, "_run", fake_run)
+
+    output = monitor_alert.maybe_unlock_stale(config, "running job 7 owner/repo#1 age 1200s > 900s")
+
+    assert output == '{"blocked":[7],"count":1}\n'
+    assert "block-running" in calls[0]
+    assert "unlock-stale" not in calls[0]
 
 
 def test_sample_executor_activity_tracks_all_executor_children(tmp_path, monkeypatch):

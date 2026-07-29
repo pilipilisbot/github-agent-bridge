@@ -97,6 +97,7 @@ class DispatchResult:
     timed_out: bool = False
     reaction_ok: bool | None = None
     command: list[str] | None = None
+    cancelled: bool = False
 
     @property
     def detail(self) -> str:
@@ -465,6 +466,43 @@ class OpenClawDispatcher:
         self.cli_grace_seconds = cli_grace_seconds
         self.feedback_db_path = feedback_db_path
         self.mode = mode
+        self._shutdown_event = threading.Event()
+        self._process_lock = threading.Lock()
+        self._active_processes: set[subprocess.Popen] = set()
+
+    def shutdown(self, kill_grace_seconds: float = 5.0) -> None:
+        """Cancel active CLI process groups and prevent new dispatches."""
+        if self._shutdown_event.is_set():
+            return
+        self._shutdown_event.set()
+        with self._process_lock:
+            processes = list(self._active_processes)
+        for proc in processes:
+            self._signal_process_group(proc, signal.SIGTERM)
+        if processes and kill_grace_seconds >= 0:
+            threading.Thread(
+                target=self._kill_processes_after_grace,
+                args=(processes, kill_grace_seconds),
+                daemon=True,
+            ).start()
+
+    @staticmethod
+    def _signal_process_group(proc: subprocess.Popen, sig: signal.Signals) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, sig)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.send_signal(sig)
+            except (OSError, ProcessLookupError):
+                pass
+
+    def _kill_processes_after_grace(self, processes: list[subprocess.Popen], grace_seconds: float) -> None:
+        if grace_seconds:
+            threading.Event().wait(grace_seconds)
+        for proc in processes:
+            self._signal_process_group(proc, signal.SIGKILL)
 
     def timeout_for(self, job: Job) -> int:
         if job.work_intent == "review_only":
@@ -591,7 +629,11 @@ class OpenClawDispatcher:
             env["PATH"] = os.path.dirname(self.node_bin) + os.pathsep + env.get("PATH", "")
         if self.mode != RunMode.LIVE:
             return DispatchResult(True, 0, "side effects skipped", "", False, reaction_ok, cmd)
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, start_new_session=True)
+        with self._process_lock:
+            if self._shutdown_event.is_set():
+                return DispatchResult(False, 130, "", "executor shutdown requested before dispatch", False, reaction_ok, cmd, True)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, start_new_session=True)
+            self._active_processes.add(proc)
 
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
@@ -613,20 +655,22 @@ class OpenClawDispatcher:
         stdout_thread.start()
         stderr_thread.start()
         try:
-            # Let OpenClaw's own --timeout own the agent run deadline. The bridge only
-            # keeps a small grace window so it can capture the CLI result cleanly.
-            proc.wait(timeout=agent_timeout + self.cli_grace_seconds)
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
-            out, err = "".join(stdout_chunks), "".join(stderr_chunks)
-            return DispatchResult(proc.returncode == 0, proc.returncode, (out or "")[:2000], (err or "")[:4000], False, reaction_ok, cmd)
-        except subprocess.TimeoutExpired:
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except Exception:
-                proc.kill()
-            proc.wait()
-            stdout_thread.join(timeout=1)
-            stderr_thread.join(timeout=1)
-            out, err = "".join(stdout_chunks), "".join(stderr_chunks)
-            return DispatchResult(False, 124, (out or "")[:2000], (err or "")[:4000], True, reaction_ok, cmd)
+                # Let OpenClaw's own --timeout own the agent run deadline. The bridge only
+                # keeps a small grace window so it can capture the CLI result cleanly.
+                proc.wait(timeout=agent_timeout + self.cli_grace_seconds)
+                stdout_thread.join(timeout=1)
+                stderr_thread.join(timeout=1)
+                out, err = "".join(stdout_chunks), "".join(stderr_chunks)
+                cancelled = self._shutdown_event.is_set() and proc.returncode != 0
+                return DispatchResult(proc.returncode == 0, proc.returncode, (out or "")[:2000], (err or "")[:4000], False, reaction_ok, cmd, cancelled)
+            except subprocess.TimeoutExpired:
+                self._signal_process_group(proc, signal.SIGKILL)
+                proc.wait()
+                stdout_thread.join(timeout=1)
+                stderr_thread.join(timeout=1)
+                out, err = "".join(stdout_chunks), "".join(stderr_chunks)
+                return DispatchResult(False, 124, (out or "")[:2000], (err or "")[:4000], True, reaction_ok, cmd)
+        finally:
+            with self._process_lock:
+                self._active_processes.discard(proc)
