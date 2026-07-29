@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.57.4 (2026-07-29)
+
+### Bug Fixes
+
+- Reconcile interrupted executor jobs safely
+  ([`65da3c5`](https://github.com/pilipilisbot/github-agent-bridge/commit/65da3c5c0bfbee07239d6ab9aba8b19ce1ed0b56))
+
+- Supervise complete job process trees
+  ([`ed565e1`](https://github.com/pilipilisbot/github-agent-bridge/commit/ed565e150947e6c81eb03fc2d479cad9006d1576))
+
+
 ## v0.57.3 (2026-07-28)
 
 ### Bug Fixes
