@@ -1,3 +1,5 @@
+import threading
+
 from github_agent_bridge.dashboard_data import job_session_events
 from github_agent_bridge.dispatch import DispatchResult
 from github_agent_bridge.executor import ExecutorConfig, ExecutorPool
@@ -55,12 +57,46 @@ class RecordingDispatcher:
         self.returncode = returncode
         self.timed_out = timed_out
 
-    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None):
+    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None, process_callback=None):
         self.jobs.append(job)
+        if process_callback:
+            process_callback(
+                {
+                    "pid": 456,
+                    "ppid": 123,
+                    "pgid": 456,
+                    "sid": 456,
+                    "start_time_ticks": 999,
+                }
+            )
         if activity_callback:
             activity_callback("openclaw_stdout", "OpenClaw CLI output", "thinking about the change")
             activity_callback("openclaw_stderr", "OpenClaw CLI error output", "token=secret ghp_abcdefghijklmnopqrstuvwxyz")
         return DispatchResult(self.ok, self.returncode, self.stdout, self.stderr, self.timed_out, reaction_ok, ["openclaw"])
+
+
+class CancelableDispatcher:
+    def __init__(self):
+        self.started = threading.Event()
+        self.cancelled = threading.Event()
+
+    def dispatch(self, job, policy, reaction_ok=None, activity_callback=None, process_callback=None):
+        if process_callback:
+            process_callback(
+                {
+                    "pid": 456,
+                    "ppid": 123,
+                    "pgid": 456,
+                    "sid": 456,
+                    "start_time_ticks": 999,
+                }
+            )
+        self.started.set()
+        self.cancelled.wait(timeout=5)
+        return DispatchResult(False, 130, "", "executor shutdown requested", cancelled=True)
+
+    def shutdown(self):
+        self.cancelled.set()
 
 
 def enqueue_pr_review(queue: JobQueue):
@@ -164,10 +200,19 @@ def test_executor_records_session_activity_events(tmp_path):
     assert pool.work_one("worker-test") is True
 
     event_types = [event["event_type"] for event in job_session_events(db, dispatcher.jobs[0].id)]
-    assert event_types == ["claimed", "dispatch_started", "model_route_selected", "openclaw_stdout", "openclaw_stderr", "dispatch_finished", "done"]
+    assert event_types == [
+        "claimed",
+        "dispatch_started",
+        "model_route_selected",
+        "process_registered",
+        "openclaw_stdout",
+        "openclaw_stderr",
+        "dispatch_finished",
+        "done",
+    ]
     route_event = job_session_events(db, dispatcher.jobs[0].id)[2]
     assert route_event["detail"] == "OpenClaw default model route"
-    stderr_event = job_session_events(db, dispatcher.jobs[0].id)[4]
+    stderr_event = job_session_events(db, dispatcher.jobs[0].id)[5]
     assert stderr_event["detail"] == "token=[redacted] [redacted]"
 
 
@@ -572,3 +617,51 @@ def test_non_actionable_review_reacts_without_dispatch_even_when_assigned(tmp_pa
     stored = queue.get(job.id)
     assert stored is not None
     assert stored.status == "done"
+
+
+def test_run_blocks_orphaned_jobs_before_claiming_new_work(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_pr_comment(queue)
+    queue.claim_next("executor-that-no-longer-exists/worker-0")
+    pool = ExecutorPool(
+        queue,
+        Policy(trusted_orgs={"gisce"}),
+        RecordingDispatcher(),
+        github=FakeGitHub(assigned=True),
+        config=ExecutorConfig(run_once=True),
+    )
+
+    pool.run()
+
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert "No prior executor process owns" in stored.last_error
+
+
+def test_shutdown_cancels_dispatch_and_blocks_job_without_requeue(tmp_path):
+    queue = JobQueue(tmp_path / "bridge.sqlite3")
+    job = enqueue_pr_comment(queue)
+    dispatcher = CancelableDispatcher()
+    github = FakeGitHub(assigned=True)
+    github.followup_url = None
+    pool = ExecutorPool(
+        queue,
+        Policy(trusted_orgs={"gisce"}),
+        dispatcher,
+        github=github,
+        config=ExecutorConfig(workers=1),
+    )
+    thread = threading.Thread(target=pool.run)
+    thread.start()
+    assert dispatcher.started.wait(timeout=5)
+
+    pool._request_shutdown()
+    thread.join(timeout=5)
+
+    assert thread.is_alive() is False
+    stored = queue.get(job.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert stored.attempts == 1
+    assert "executor shutdown requested" in stored.last_error

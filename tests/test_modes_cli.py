@@ -1,3 +1,6 @@
+import threading
+import time
+
 from github_agent_bridge.dispatch import GitHubClient, OpenClawDispatcher, RunMode
 from github_agent_bridge.models import GitHubContext, Job
 from github_agent_bridge.policy import ModelRoute, ModelRoutes, Policy
@@ -196,17 +199,22 @@ def test_live_dispatch_streams_openclaw_output_to_activity_callback(tmp_path):
     )
     openclaw.chmod(0o755)
     events = []
+    processes = []
 
     result = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1).dispatch(
         make_job(),
         Policy(trusted_orgs={"gisce"}),
         reaction_ok=True,
         activity_callback=lambda event_type, summary, detail: events.append((event_type, summary, detail)),
+        process_callback=lambda identity: processes.append(identity),
     )
 
     assert result.ok is True
     assert ("openclaw_stdout", "OpenClaw CLI output", "thinking line") in events
     assert ("openclaw_stderr", "OpenClaw CLI error output", "tool error") in events
+    assert len(processes) == 1
+    assert processes[0]["pid"] > 0
+    assert processes[0]["start_time_ticks"] > 0
 
 
 def test_live_dispatch_streams_partial_openclaw_output_before_process_exits(tmp_path, monkeypatch):
@@ -238,6 +246,39 @@ def test_live_dispatch_streams_partial_openclaw_output_before_process_exits(tmp_
     assert result.ok is True
     assert done.exists()
     assert callback_observed_done == [False]
+
+
+def test_dispatcher_shutdown_terminates_active_process_group(tmp_path, monkeypatch):
+    started = tmp_path / "started"
+    openclaw = tmp_path / "openclaw"
+    openclaw.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os\n"
+        "import pathlib\n"
+        "import time\n"
+        "pathlib.Path(os.environ['STARTED_FILE']).write_text('started', encoding='utf-8')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    openclaw.chmod(0o755)
+    monkeypatch.setenv("STARTED_FILE", str(started))
+    dispatcher = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1)
+    results = []
+    thread = threading.Thread(
+        target=lambda: results.append(dispatcher.dispatch(make_job(), Policy(trusted_orgs={"gisce"}))),
+    )
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not started.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert started.exists()
+    dispatcher.shutdown(kill_grace_seconds=0.1)
+    thread.join(timeout=5)
+
+    assert thread.is_alive() is False
+    assert results[0].ok is False
+    assert results[0].cancelled is True
 
 
 def test_dispatcher_does_not_hardcode_org_agent_fallback():

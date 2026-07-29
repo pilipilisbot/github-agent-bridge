@@ -202,6 +202,7 @@ def inspect_db_read_only(db: str | Path) -> dict[str, Any]:
         if table_exists(con, "state"):
             state = {r["key"]: r["value"] for r in con.execute("SELECT key,value FROM state")}
             out["last_uid"] = state.get("last_uid")
+            out["executor_process_tracking_id"] = state.get("executor_process_tracking_id")
         if table_exists(con, "feedback_rule_proposals"):
             knowledge_counts = {
                 r["status"]: int(r["count"])
@@ -219,7 +220,7 @@ def inspect_db_read_only(db: str | Path) -> dict[str, Any]:
                 out["last_worklog"] = dict(last_log)
         running_rows = con.execute(
             """
-            SELECT id, work_key, work_intent, locked_by, attempts, started_at, updated_at
+            SELECT id, work_key, work_intent, locked_by, attempts, started_at, updated_at, metadata_json
             FROM jobs
             WHERE status='running'
             ORDER BY id
@@ -233,6 +234,7 @@ def inspect_db_read_only(db: str | Path) -> dict[str, Any]:
                 "work_intent": row["work_intent"],
                 "locked_by": row["locked_by"],
                 "attempts": row["attempts"],
+                "runtime_process": json.loads(row["metadata_json"] or "{}").get("runtime_process"),
                 "age_seconds": duration_seconds(row["started_at"]),
                 "idle_seconds": duration_seconds(row["updated_at"]),
                 "last_worklog": _last_worklog(con, int(row["id"])),

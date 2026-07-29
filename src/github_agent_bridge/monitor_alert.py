@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .monitor import ALERT_RUNNING_NO_EXECUTOR_CHILD
+from .monitor import ALERT_RUNNING_NO_EXECUTOR_CHILD, ALERT_RUNNING_PROCESS_MISMATCH
 from .observability import configure_sentry
 
 
@@ -32,6 +32,7 @@ class AlertConfig:
     kill_stale_children: bool
     terminate_grace_seconds: int
     proc_idle_seconds: int
+    executor_unit: str = "github-agent-bridge.service"
 
     @property
     def state_file(self) -> Path:
@@ -62,6 +63,7 @@ class AlertConfig:
             kill_stale_children=_parse_bool(values.get("GITHUB_AGENT_BRIDGE_KILL_STALE_CHILDREN", "")),
             terminate_grace_seconds=int(values.get("GITHUB_AGENT_BRIDGE_TERMINATE_GRACE_SECONDS", "5")),
             proc_idle_seconds=int(values.get("GITHUB_AGENT_BRIDGE_PROC_IDLE_SECONDS", "240")),
+            executor_unit=values.get("GITHUB_AGENT_BRIDGE_EXECUTOR_UNIT", "github-agent-bridge.service"),
         )
 
 
@@ -103,6 +105,8 @@ def run_monitor(config: AlertConfig) -> subprocess.CompletedProcess[str]:
             str(config.work_running_warn_seconds),
             "--progress-warn-seconds",
             str(config.progress_warn_seconds),
+            "--executor-unit",
+            config.executor_unit,
         ]
     )
 
@@ -245,7 +249,7 @@ def process_sample_active(previous: dict[str, object] | None, current: dict[str,
 
 
 def sample_executor_activity(config: AlertConfig, main_pid: str | None = None, now: int | None = None) -> str:
-    main_pid = main_pid or get_main_pid()
+    main_pid = main_pid or get_main_pid(config.executor_unit)
     if not main_pid or main_pid == "0" or not has_child_processes(main_pid):
         return ""
     children = child_pids(main_pid)
@@ -300,29 +304,76 @@ def running_job_ids(output: str) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def retry_jobs(config: AlertConfig, job_ids: list[str]) -> str:
-    lines = []
-    for job_id in dict.fromkeys(job_ids):
-        proc = _run([
+def process_mismatch_job_ids(output: str) -> list[str]:
+    if f"[{ALERT_RUNNING_PROCESS_MISMATCH}]" not in output:
+        return []
+    return list(
+        dict.fromkeys(
+            re.findall(r"running job (\d+) process ownership mismatch", output)
+            + re.findall(r"running detail: job=(\d+)\b", output)
+        )
+    )
+
+
+def block_orphaned_jobs(
+    config: AlertConfig,
+    job_ids: list[str],
+    reason: str,
+    *,
+    older_than_seconds: int | None = None,
+) -> str:
+    older_than = (config.auto_unlock_seconds or 0) if older_than_seconds is None else older_than_seconds
+    proc = _run(
+        [
             _expand(config.bridge_bin),
             "--db",
             _expand(config.db),
             "--policy",
             _expand(config.policy),
-            "retry",
-            job_id,
-        ])
-        lines.append(proc.stdout.strip())
-    return "\n".join(line for line in lines if line) + ("\n" if lines else "")
+            "block-running",
+            "--older-than",
+            str(older_than),
+            "--reason",
+            reason,
+            *(item for job_id in dict.fromkeys(job_ids) for item in ("--job-id", job_id)),
+        ]
+    )
+    return proc.stdout
+
+
+def reconcile_process_mismatch(config: AlertConfig, job_ids: list[str]) -> str:
+    """Restart the whole executor cgroup so detached descendants cannot survive."""
+    main_pid = get_main_pid(config.executor_unit)
+    restart_output = ""
+    if main_pid and main_pid != "0":
+        proc = _run(["systemctl", "--user", "restart", config.executor_unit])
+        returncode = int(getattr(proc, "returncode", 0) or 0)
+        restart_output = f"executor cgroup restart rc={returncode}\n"
+        if proc.stdout:
+            restart_output += proc.stdout
+    blocked_output = block_orphaned_jobs(
+        config,
+        job_ids,
+        "The registered root process no longer matched this running job. The complete executor cgroup was restarted so detached descendants were stopped; the job was blocked and not auto-requeued.",
+        older_than_seconds=0,
+    )
+    return restart_output + blocked_output
 
 
 def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
+    mismatch_ids = process_mismatch_job_ids(output)
+    if mismatch_ids:
+        return reconcile_process_mismatch(config, mismatch_ids)
     job_ids = running_job_ids(output)
     if config.auto_unlock_seconds is None or not job_ids:
         return ""
-    main_pid = get_main_pid()
+    main_pid = get_main_pid(config.executor_unit)
     if not main_pid or main_pid == "0":
-        return ""
+        return block_orphaned_jobs(
+            config,
+            job_ids,
+            "The executor service is inactive and no process owns this stale running job. It was not auto-requeued.",
+        )
     child_output = ""
     if has_child_processes(main_pid):
         if not config.kill_stale_children:
@@ -334,21 +385,12 @@ def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
             return sample_output
         results = [terminate_process_group(pid, config.terminate_grace_seconds) for pid in child_pids(main_pid)]
         child_output = sample_output + "terminated stale child processes:\n" + "\n".join(results) + "\n"
-    proc = _run(
-        [
-            _expand(config.bridge_bin),
-            "--db",
-            _expand(config.db),
-            "--policy",
-            _expand(config.policy),
-            "unlock-stale",
-            "--older-than",
-            str(config.auto_unlock_seconds),
-            *(item for job_id in dict.fromkeys(job_ids) for item in ("--job-id", job_id)),
-        ]
+    blocked_output = block_orphaned_jobs(
+        config,
+        job_ids,
+        "No live executor child owns this stale running job. It was blocked after process reconciliation and not auto-requeued.",
     )
-    retry_output = retry_jobs(config, running_job_ids(output)) if child_output else ""
-    return child_output + proc.stdout + retry_output
+    return child_output + blocked_output
 
 
 def load_state(path: Path) -> tuple[str, int]:

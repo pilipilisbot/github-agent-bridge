@@ -176,6 +176,61 @@ def test_monitor_reports_executor_child_processes(tmp_path, monkeypatch):
     assert "executor children: 456:openclaw agent" in report.text()
 
 
+def test_monitor_alerts_when_registered_job_process_is_dead(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    q.enqueue(notif(), Policy(trusted_orgs={"gisce"}))
+    executor_id = "executor-123-deadbeef"
+    worker_id = f"{executor_id}/worker-0"
+    job = q.claim_next(worker_id)
+    assert job is not None
+    q.register_runtime_process(
+        job.id,
+        worker_id,
+        executor_id,
+        {"pid": 456, "ppid": 123, "pgid": 456, "sid": 456, "start_time_ticks": 999},
+    )
+    q.set_state("executor_process_tracking_id", executor_id)
+    monkeypatch.setattr(monitor_module, "_is_active", lambda unit: "active")
+    monkeypatch.setattr(monitor_module, "_main_pid", lambda unit: 123)
+    monkeypatch.setattr(monitor_module, "_direct_children", lambda pid: [{"pid": 789, "cmd": "other job"}])
+    monkeypatch.setattr(monitor_module, "_last_service_result", lambda unit: ("success", "0", 42))
+    monkeypatch.setattr(monitor_module, "process_identity_matches", lambda *args, **kwargs: False)
+
+    report = monitor(db)
+
+    assert report.ok is False
+    assert "monitor.running_process_mismatch" in report.metrics["alert_codes"]
+    assert any("PID 456 is dead, reparented, zombie, or reused" in alert for alert in report.alerts)
+    assert "runtime detail: job=1 state=running pid=456" in report.text()
+
+
+def test_monitor_accepts_registered_job_process_identity(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    q.enqueue(notif(), Policy(trusted_orgs={"gisce"}))
+    executor_id = "executor-123-deadbeef"
+    worker_id = f"{executor_id}/worker-0"
+    job = q.claim_next(worker_id)
+    assert job is not None
+    q.register_runtime_process(
+        job.id,
+        worker_id,
+        executor_id,
+        {"pid": 456, "ppid": 123, "pgid": 456, "sid": 456, "start_time_ticks": 999},
+    )
+    q.set_state("executor_process_tracking_id", executor_id)
+    monkeypatch.setattr(monitor_module, "_is_active", lambda unit: "active")
+    monkeypatch.setattr(monitor_module, "_main_pid", lambda unit: 123)
+    monkeypatch.setattr(monitor_module, "_direct_children", lambda pid: [{"pid": 456, "cmd": "openclaw agent"}])
+    monkeypatch.setattr(monitor_module, "_last_service_result", lambda unit: ("success", "0", 42))
+    monkeypatch.setattr(monitor_module, "process_identity_matches", lambda *args, **kwargs: True)
+
+    report = monitor(db)
+
+    assert "monitor.running_process_mismatch" not in report.metrics.get("alert_codes", [])
+
+
 def test_monitor_persists_process_samples_and_alert_state(tmp_path, monkeypatch):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)
