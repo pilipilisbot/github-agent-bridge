@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.58.0 (2026-07-30)
+
+### Features
+
+- Allow cancelling running jobs
+  ([`0fb09a5`](https://github.com/pilipilisbot/github-agent-bridge/commit/0fb09a50979b061fa3cff324b77d0bca97a41012))
+
+
 ## v0.57.4 (2026-07-29)
 
 ### Bug Fixes
