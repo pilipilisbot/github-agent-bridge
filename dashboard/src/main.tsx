@@ -753,6 +753,12 @@ function isRetryableStatus(status: string) {
   return ["blocked", "denied", "waiting_approval"].includes(status);
 }
 
+function canCancelJob(job: Job, user?: UserProfile) {
+  if (job.status !== "running") return false;
+  if (user?.is_admin) return true;
+  return Boolean(user?.login && job.trigger_actor && user.login.toLowerCase() === job.trigger_actor.toLowerCase());
+}
+
 function selectedJobIdFromPath(pathname = window.location.pathname) {
   const match = pathname.match(/^\/jobs\/(\d+)\/?$/);
   return match ? Number(match[1]) : null;
@@ -863,6 +869,13 @@ function App() {
     queryClient.setQueryData<{ job: Job }>(["job", jobId], { job: payload.job });
     queryClient.invalidateQueries({ queryKey: ["jobs"] });
     queryClient.invalidateQueries({ queryKey: ["metrics"] });
+  }, [queryClient]);
+  const cancelJob = React.useCallback(async (jobId: number, reason?: string) => {
+    const payload = await api<{ job: Job }>(`/api/jobs/${jobId}/cancel`, { method: "POST", body: JSON.stringify({ reason: reason || "" }) });
+    queryClient.setQueryData<{ job: Job }>(["job", jobId], { job: payload.job });
+    queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    queryClient.invalidateQueries({ queryKey: ["metrics"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard-status"] });
   }, [queryClient]);
   const moderateKnowledgeProposal = React.useCallback(async (proposalId: string, action: "approve" | "reject") => {
     await api<{ proposal: KnowledgeProposal }>(`/api/knowledge/proposals/${encodeURIComponent(proposalId)}/${action}`, { method: "POST" });
@@ -1067,6 +1080,7 @@ function App() {
             onBackToDashboard={() => navigateDashboard("/")}
             onRetry={retryJob}
             onDismiss={dismissJob}
+            onCancel={cancelJob}
             onRefresh={() => {
               detail.refetch();
               session.refetch();
@@ -1156,6 +1170,7 @@ function App() {
                   user={me.data?.user}
                   onRetry={retryJob}
                   onDismiss={dismissJob}
+                  onCancel={cancelJob}
                 />
               </Panel>
               <Panel title="Runtime usage" action={<RefreshButton onClick={() => metrics.refetch()} />}>
@@ -1492,6 +1507,7 @@ function JobDetailPage({
   onBackToDashboard,
   onRetry,
   onDismiss,
+  onCancel,
   onRefresh,
 }: {
   jobId: number;
@@ -1501,13 +1517,17 @@ function JobDetailPage({
   onBackToDashboard: () => void;
   onRetry: (jobId: number) => Promise<void>;
   onDismiss: (jobId: number) => Promise<void>;
+  onCancel: (jobId: number, reason?: string) => Promise<void>;
   onRefresh: () => void;
 }) {
   const [retrying, setRetrying] = React.useState(false);
   const [dismissing, setDismissing] = React.useState(false);
+  const [cancelling, setCancelling] = React.useState(false);
   const canRetry = Boolean(user?.is_admin && selectedJob && isRetryableStatus(selectedJob.status));
+  const canCancel = Boolean(selectedJob && canCancelJob(selectedJob, user));
   const retryLabel = retrying ? "Retrying..." : "Retry";
   const dismissLabel = dismissing ? "Dismissing..." : "Dismiss";
+  const cancelLabel = cancelling ? "Cancelling..." : "Cancel";
   return (
     <div className="grid min-w-0 gap-3 sm:gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1560,6 +1580,26 @@ function JobDetailPage({
             >
               <CheckCircle2 className="h-4 w-4" aria-hidden />
               {dismissLabel}
+            </button>
+          ) : null}
+          {canCancel ? (
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              disabled={cancelling}
+              onClick={async () => {
+                const reason = window.prompt(`Cancel job #${jobId}? Optional reason:`);
+                if (reason === null) return;
+                setCancelling(true);
+                try {
+                  await onCancel(jobId, reason);
+                } finally {
+                  setCancelling(false);
+                }
+              }}
+            >
+              <X className="h-4 w-4" aria-hidden />
+              {cancelLabel}
             </button>
           ) : null}
           <RefreshButton onClick={onRefresh} />
@@ -2615,6 +2655,7 @@ function JobsList({
   user,
   onRetry,
   onDismiss,
+  onCancel,
 }: {
   jobs: Job[];
   loading: boolean;
@@ -2626,9 +2667,11 @@ function JobsList({
   user?: UserProfile;
   onRetry?: (jobId: number) => Promise<void>;
   onDismiss?: (jobId: number) => Promise<void>;
+  onCancel?: (jobId: number, reason?: string) => Promise<void>;
 }) {
   const [retryingJobId, setRetryingJobId] = React.useState<number | null>(null);
   const [dismissingJobId, setDismissingJobId] = React.useState<number | null>(null);
+  const [cancellingJobId, setCancellingJobId] = React.useState<number | null>(null);
   const loadMoreRequestedRef = React.useRef(false);
   const wasLoadingMoreRef = React.useRef(loadingMore);
   const canRetryFromList = Boolean(user?.is_admin && onRetry);
@@ -2660,6 +2703,15 @@ function JobsList({
       setDismissingJobId(null);
     }
   }, [onDismiss]);
+  const cancelJobFromList = React.useCallback(async (jobId: number, reason?: string) => {
+    if (!onCancel) return;
+    setCancellingJobId(jobId);
+    try {
+      await onCancel(jobId, reason);
+    } finally {
+      setCancellingJobId(null);
+    }
+  }, [onCancel]);
 
   if (loading && jobs.length === 0) return <EmptyState text="Loading jobs..." />;
   if (jobs.length === 0) return <EmptyState text="No jobs match the current filters." />;
@@ -2678,6 +2730,9 @@ function JobsList({
             canDismiss={canDismissFromList && isRetryableStatus(job.status)}
             dismissing={dismissingJobId === job.id}
             onDismiss={dismissJobFromList}
+            canCancel={Boolean(onCancel && canCancelJob(job, user))}
+            cancelling={cancellingJobId === job.id}
+            onCancel={cancelJobFromList}
           />
         ))}
         <MobileLoadMoreJobs hasMore={hasMore} loading={loadingMore} onLoadMore={requestMoreJobs} />
@@ -2708,6 +2763,9 @@ function JobsList({
                 canDismiss={canDismissFromList && isRetryableStatus(job.status)}
                 dismissing={dismissingJobId === job.id}
                 onDismiss={dismissJobFromList}
+                canCancel={Boolean(onCancel && canCancelJob(job, user))}
+                cancelling={cancellingJobId === job.id}
+                onCancel={cancelJobFromList}
               />
             ))}
           </tbody>
@@ -2728,6 +2786,9 @@ function DesktopJobRow({
   canDismiss,
   dismissing,
   onDismiss,
+  canCancel,
+  cancelling,
+  onCancel,
 }: {
   job: Job;
   now: number;
@@ -2738,6 +2799,9 @@ function DesktopJobRow({
   canDismiss: boolean;
   dismissing: boolean;
   onDismiss: (jobId: number) => Promise<void>;
+  canCancel: boolean;
+  cancelling: boolean;
+  onCancel: (jobId: number, reason?: string) => Promise<void>;
 }) {
   return (
     <tr className="cursor-pointer border-b border-border align-top hover:bg-slate-50" onClick={() => onViewJob(job.id)}>
@@ -2788,6 +2852,7 @@ function DesktopJobRow({
         <div className="inline-flex items-center gap-1">
           <RetryJobButton jobId={job.id} canRetry={canRetry} retrying={retrying} onRetry={onRetry} compact />
           <DismissJobButton jobId={job.id} canDismiss={canDismiss} dismissing={dismissing} onDismiss={onDismiss} compact />
+          <CancelJobButton jobId={job.id} canCancel={canCancel} cancelling={cancelling} onCancel={onCancel} compact />
         </div>
       </td>
     </tr>
@@ -2843,6 +2908,9 @@ function JobCard({
   canDismiss,
   dismissing,
   onDismiss,
+  canCancel,
+  cancelling,
+  onCancel,
 }: {
   job: Job;
   onViewJob: (id: number) => void;
@@ -2853,6 +2921,9 @@ function JobCard({
   canDismiss: boolean;
   dismissing: boolean;
   onDismiss: (jobId: number) => Promise<void>;
+  canCancel: boolean;
+  cancelling: boolean;
+  onCancel: (jobId: number, reason?: string) => Promise<void>;
 }) {
   return (
     <article className="rounded-md border border-border bg-white shadow-[0_1px_0_rgba(15,23,42,0.03)]">
@@ -2878,10 +2949,11 @@ function JobCard({
           <MiniStat label="Updated" value={<TimeText value={job.updated_at} compact relative now={now} />} />
         </div>
       </button>
-      {canRetry || canDismiss ? (
+      {canRetry || canDismiss || canCancel ? (
         <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
           <RetryJobButton jobId={job.id} canRetry={canRetry} retrying={retrying} onRetry={onRetry} />
           <DismissJobButton jobId={job.id} canDismiss={canDismiss} dismissing={dismissing} onDismiss={onDismiss} />
+          <CancelJobButton jobId={job.id} canCancel={canCancel} cancelling={cancelling} onCancel={onCancel} />
         </div>
       ) : null}
     </article>
@@ -2957,6 +3029,44 @@ function DismissJobButton({
       }}
     >
       <CheckCircle2 className="h-4 w-4" aria-hidden />
+      <span className={cn(compact && "sr-only")}>{label}</span>
+    </button>
+  );
+}
+
+function CancelJobButton({
+  jobId,
+  canCancel,
+  cancelling,
+  onCancel,
+  compact = false,
+}: {
+  jobId: number;
+  canCancel: boolean;
+  cancelling: boolean;
+  onCancel: (jobId: number, reason?: string) => Promise<void>;
+  compact?: boolean;
+}) {
+  if (!canCancel) return null;
+  const label = cancelling ? "Cancelling..." : "Cancel";
+  return (
+    <button
+      className={cn(
+        "inline-flex h-8 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60",
+        compact ? "w-8 px-0" : "px-3",
+      )}
+      type="button"
+      disabled={cancelling}
+      aria-label={`Cancel job #${jobId}`}
+      title={`Cancel job #${jobId}`}
+      onClick={async (event) => {
+        event.stopPropagation();
+        const reason = window.prompt(`Cancel job #${jobId}? Optional reason:`);
+        if (reason === null) return;
+        await onCancel(jobId, reason);
+      }}
+    >
+      <X className="h-4 w-4" aria-hidden />
       <span className={cn(compact && "sr-only")}>{label}</span>
     </button>
   );

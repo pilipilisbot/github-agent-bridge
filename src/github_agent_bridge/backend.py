@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .autoupdate import apply_update_plan, complete_pending_reload, load_update_state, plan_update, record_update_plan, save_update_state
+from .cancellation import cancel_running_job
 from .cli import DEFAULT_DB
 from .feedback import (
     approve_proposal,
@@ -441,6 +442,18 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not_authorized")
         return profile
 
+    def can_cancel_job(job_id: int, profile: dict[str, Any]) -> bool:
+        if profile.get("is_admin"):
+            return True
+        login = str(profile.get("login") or "").strip().lower()
+        if not login:
+            return False
+        job = JobQueue(config.db).get(job_id)
+        if job is None:
+            return False
+        actors = [job.trigger_actor, *JobQueue(config.db).coalesced_trigger_actors(job_id)]
+        return login in {str(actor or "").strip().lstrip("@").lower() for actor in actors if actor}
+
     async def require_dashboard_profile_or_login(request: Request) -> RedirectResponse | None:
         try:
             await current_profile(request)
@@ -525,6 +538,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         admin_actions = [
             "retry_job",
             "dismiss_job",
+            "cancel_job",
             "approve_knowledge_proposal",
             "reject_knowledge_proposal",
             "update_knowledge_rule_scope",
@@ -695,6 +709,31 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="job_not_dismissable")
         job = get_job_detail(config.db, job_id)
         return {"job": job, "detail": "job_dismissed"}
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    async def api_job_cancel(job_id: int, request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        if get_job_detail(config.db, job_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
+        if not can_cancel_job(job_id, profile):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="job_cancel_not_allowed")
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cancel_payload_required")
+        reason = str(payload.get("reason") or "").strip() or None
+        result = cancel_running_job(JobQueue(config.db), job_id, actor=str(profile["login"]), reason=reason)
+        if not result.cancelled:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="job_not_running")
+        job = get_job_detail(config.db, job_id)
+        return {
+            "job": job,
+            "detail": "job_cancelled",
+            "signalled": result.signalled,
+            "signal_detail": result.detail,
+            "followup_url": result.followup_url,
+        }
 
     @app.get("/api/jobs/{job_id}/session")
     def api_job_session(job_id: int, _: str = Depends(current_user)) -> dict[str, Any]:

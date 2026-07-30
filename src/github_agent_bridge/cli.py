@@ -14,6 +14,7 @@ from pathlib import Path
 from . import feedback
 from .actors import backfill_trigger_actors
 from .autoupdate import apply_update_plan, complete_pending_reload, plan_update, record_update_plan
+from .cancellation import cancel_running_job
 from .dashboard_data import inspect_db_read_only, list_jobs
 from .dispatch import FEEDBACK_LEARNING_RULES, GitHubClient, OpenClawDispatcher, RunMode, prompt_rule
 from .executor import ExecutorConfig, ExecutorPool
@@ -235,6 +236,25 @@ def cmd_dismiss(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_cancel(args: argparse.Namespace) -> int:
+    result = cancel_running_job(
+        JobQueue(args.db),
+        args.job_id,
+        actor=args.actor,
+        reason=args.reason,
+        github=GitHubClient(args.gh_bin, mode=RunMode.SHADOW if args.no_github_comment else RunMode.LIVE),
+        signal_grace_seconds=args.signal_grace,
+    )
+    print(json.dumps({
+        "job_id": args.job_id,
+        "cancelled": result.cancelled,
+        "signalled": result.signalled,
+        "followup_url": result.followup_url,
+        "detail": result.detail,
+    }, ensure_ascii=False))
+    return 0 if result.cancelled else 1
+
+
 def cmd_unlock_stale(args: argparse.Namespace) -> int:
     n = JobQueue(args.db).unlock_stale(args.older_than, job_ids=args.job_id)
     print(json.dumps({"unlocked": n}, ensure_ascii=False))
@@ -453,6 +473,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("jobs"); s.add_argument("--status"); s.add_argument("--limit", type=int, default=20); s.set_defaults(func=cmd_jobs)
     s = sub.add_parser("retry"); s.add_argument("job_id", type=int); s.set_defaults(func=cmd_retry)
     s = sub.add_parser("dismiss"); s.add_argument("job_id", type=int); s.add_argument("--reason", required=True); s.set_defaults(func=cmd_dismiss)
+    s = sub.add_parser("cancel", help="cancel a running job, stop its runtime process, and comment on GitHub")
+    s.add_argument("job_id", type=int)
+    s.add_argument("--actor", required=True, help="GitHub login of the admin or job owner cancelling the job")
+    s.add_argument("--reason", default=None, help="optional cancellation reason")
+    s.add_argument("--gh-bin", default="gh")
+    s.add_argument("--signal-grace", type=float, default=5.0, help="seconds to wait after SIGTERM before SIGKILL")
+    s.add_argument("--no-github-comment", action="store_true", help="skip the GitHub cancellation comment")
+    s.set_defaults(func=cmd_cancel)
     s = sub.add_parser("unlock-stale")
     s.add_argument("--older-than", type=int, default=1800)
     s.add_argument("--job-id", type=int, action="append", help="only unlock a specific running job id; repeat for multiple jobs")

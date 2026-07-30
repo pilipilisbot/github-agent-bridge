@@ -262,13 +262,131 @@ class JobQueue:
     def finish(self, job_id: int, status: str, summary: str, detail: str | None = None) -> None:
         now = utc_now()
         with self.connect() as con:
-            con.execute("UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=?, updated_at=? WHERE id=?", (status, detail if status == "blocked" else None, now, now, job_id))
             row = con.execute("SELECT work_key FROM jobs WHERE id=?", (job_id,)).fetchone()
-            self._log(con, job_id, row["work_key"] if row else None, status, summary, detail)
             metadata = self._job_metadata(con, job_id)
+            cancellation = metadata.get("cancellation")
+            if isinstance(cancellation, dict) and cancellation.get("state") in {"requested", "cancelled"}:
+                status = "blocked"
+                summary = str(cancellation.get("summary") or summary)
+                detail = str(cancellation.get("detail") or detail or "")
+                con.execute(
+                    "UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=COALESCE(finished_at, ?), updated_at=? WHERE id=?",
+                    (status, detail if status == "blocked" else None, now, now, job_id),
+                )
+            else:
+                con.execute(
+                    "UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=?, updated_at=? WHERE id=?",
+                    (status, detail if status == "blocked" else None, now, now, job_id),
+                )
+            self._log(con, job_id, row["work_key"] if row else None, status, summary, detail)
             session_id = metadata.get("openclaw_session_id") or session_id_for_job(job_id)
             self._session_event(con, job_id, row["work_key"] if row else None, str(session_id), status, summary, detail)
             self._progress(con, job_id, row["work_key"] if row else None, "semantic", status, summary, detail)
+
+    def request_cancel_running(
+        self,
+        job_id: int,
+        *,
+        actor: str,
+        reason: str | None = None,
+    ) -> Job | None:
+        """Record a manual cancellation request for a running job."""
+        now = utc_now()
+        clean_actor = actor.strip().lstrip("@") or "unknown"
+        clean_reason = (reason or "").strip()
+        summary = f"job cancellation requested by @{clean_actor}"
+        detail = f"reason={clean_reason}" if clean_reason else "reason not provided"
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT work_key, metadata_json FROM jobs WHERE id=? AND status='running'",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                con.commit()
+                return None
+            metadata = json.loads(row["metadata_json"] or "{}")
+            existing_cancellation = metadata.get("cancellation")
+            metadata["cancellation"] = {
+                "state": "requested",
+                "actor": clean_actor,
+                "reason": clean_reason,
+                "requested_at": now,
+                "summary": summary,
+                "detail": detail,
+            }
+            con.execute(
+                "UPDATE jobs SET updated_at=?, metadata_json=? WHERE id=? AND status='running'",
+                (now, json.dumps(metadata, sort_keys=True), job_id),
+            )
+            self._log(con, job_id, row["work_key"], "cancel_requested", summary, detail)
+            session_id = str(metadata.get("openclaw_session_id") or session_id_for_job(job_id))
+            self._session_event(con, job_id, row["work_key"], session_id, "cancel_requested", summary, detail)
+            self._progress(con, job_id, row["work_key"], "semantic", "cancel_requested", summary, detail)
+            con.commit()
+        return self.get(job_id)
+
+    def mark_cancelled(
+        self,
+        job_id: int,
+        *,
+        actor: str,
+        reason: str | None = None,
+        signal_detail: str | None = None,
+        followup_url: str | None = None,
+    ) -> Job | None:
+        """Mark a running job as manually cancelled using the existing blocked state."""
+        now = utc_now()
+        clean_actor = actor.strip().lstrip("@") or "unknown"
+        clean_reason = (reason or "").strip()
+        summary = f"job cancelled by @{clean_actor}"
+        detail_parts = []
+        if clean_reason:
+            detail_parts.append(f"reason={clean_reason}")
+        if signal_detail:
+            detail_parts.append(signal_detail)
+        if followup_url:
+            detail_parts.append(f"followup_url={followup_url}")
+        detail = "; ".join(detail_parts) if detail_parts else "manual cancellation"
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT status, work_key, metadata_json FROM jobs WHERE id=?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                con.commit()
+                return None
+            metadata = json.loads(row["metadata_json"] or "{}")
+            metadata["cancellation"] = {
+                "state": "cancelled",
+                "actor": clean_actor,
+                "reason": clean_reason,
+                "cancelled_at": now,
+                "signal_detail": signal_detail,
+                "followup_url": followup_url,
+                "summary": summary,
+                "detail": detail,
+            }
+            if row["status"] != "running":
+                if not (isinstance(existing_cancellation, dict) and existing_cancellation.get("state") == "requested"):
+                    con.commit()
+                    return None
+            cur = con.execute(
+                """UPDATE jobs
+                SET status='blocked', locked_by=NULL, last_error=?, finished_at=COALESCE(finished_at, ?), updated_at=?, metadata_json=?
+                WHERE id=?""",
+                (detail, now, now, json.dumps(metadata, sort_keys=True), job_id),
+            )
+            if not cur.rowcount:
+                con.commit()
+                return None
+            self._log(con, job_id, row["work_key"], "cancelled", summary, detail)
+            session_id = str(metadata.get("openclaw_session_id") or session_id_for_job(job_id))
+            self._session_event(con, job_id, row["work_key"], session_id, "cancelled", summary, detail)
+            self._progress(con, job_id, row["work_key"], "semantic", "cancelled", summary, detail)
+            con.commit()
+        return self.get(job_id)
 
     def requeue_running(
         self,
