@@ -22,6 +22,7 @@ from .session_correlation import (
     session_id_for_job,
     session_id_for_job_attempt,
     session_key_for_rescue,
+    session_key_for_work,
 )
 
 PROMPT_RULES_PACKAGE = "github_agent_bridge.prompt_rules"
@@ -706,11 +707,12 @@ class OpenClawDispatcher:
             cmd += ["--thinking", model_route.thinking]
         agent_timeout = self.timeout_for(job)
         fresh_session = bool(job.metadata.get("fresh_session_on_retry")) and job.attempts > 1
-        # An attempt must never share mutable session state with a prior
-        # gateway-dispatched run. Reusing the thread key lets a recovered or
-        # stale session race local startup ("session changed while starting")
-        # even though its process is now correctly contained.
-        session_key = session_key_for_rescue(job.work_key, job.id, job.attempts)
+        # Keep normal local dispatches on a stable per-thread key. Its versioned
+        # local namespace cannot collide with legacy gateway-dispatched runs;
+        # only an explicit recovery retry needs an attempt-scoped rescue key.
+        session_key = session_key_for_work(job.work_key)
+        if fresh_session:
+            session_key = session_key_for_rescue(job.work_key, job.id, job.attempts)
         if fresh_session or job.work_intent == "work_allowed":
             default_session_id = session_id_for_job_attempt(job.id, job.attempts)
             session_id = normalize_session_id(default_session_id)

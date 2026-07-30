@@ -6,6 +6,7 @@ from typing import Any
 
 SESSION_ID_PREFIX = "github-agent-bridge-job"
 SESSION_KEY_PREFIX = "github-agent-bridge"
+LOCAL_SESSION_KEY_NAMESPACE = "local-v2"
 SESSION_ID_PATTERN = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 
@@ -19,7 +20,7 @@ def session_id_for_job_attempt(job_id: int, attempt: int) -> str:
 
 
 def session_key_for_work(work_key: str) -> str:
-    return f"{SESSION_KEY_PREFIX}:{normalize_session_id(work_key)}"
+    return f"{SESSION_KEY_PREFIX}:{LOCAL_SESSION_KEY_NAMESPACE}:{normalize_session_id(work_key)}"
 
 
 def session_key_for_rescue(work_key: str, job_id: int, attempt: int) -> str:

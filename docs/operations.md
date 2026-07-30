@@ -296,9 +296,10 @@ therefore run in that job's scope instead of being owned and recoverable by the
 gateway. `KillMode=control-group` terminates the complete tree for one attempt,
 including tools that create their own process groups or sessions, without
 touching the executor or another worker. The configured worker count is also
-the global concurrency limit for bridge work. Every job attempt receives a
-unique OpenClaw session key, so stale session state from an earlier
-gateway-dispatched run cannot race or resume the new attempt.
+the global concurrency limit for bridge work. Normal local dispatches share a
+versioned per-thread OpenClaw session key that cannot collide with legacy
+gateway-dispatched runs. Explicit recovery retries receive an attempt-scoped
+rescue key so stale local session state cannot race or resume the new attempt.
 
 Set `GITHUB_AGENT_BRIDGE_KILL_STALE_CHILDREN=1` in the private systemd env file
 only if legacy process-activity sampling is still required. This option no
