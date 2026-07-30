@@ -67,6 +67,9 @@ def test_shadow_dispatch_returns_command_without_running():
     result = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW).dispatch(make_job(), Policy(trusted_orgs={"gisce"}), reaction_ok=True)
     assert result.ok is True
     assert result.command
+    assert result.command[0] == "systemd-run"
+    assert "--scope" in result.command
+    assert "--unit=github-agent-bridge-job-1-attempt-1.scope" in result.command
     assert "agent" in result.command
     assert "--local" in result.command
     assert "--model" not in result.command
@@ -214,7 +217,12 @@ def test_live_dispatch_streams_openclaw_output_to_activity_callback(tmp_path):
     events = []
     processes = []
 
-    result = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1).dispatch(
+    result = OpenClawDispatcher(
+        openclaw_bin=str(openclaw),
+        mode=RunMode.LIVE,
+        cli_grace_seconds=1,
+        systemd_run_bin=None,
+    ).dispatch(
         make_job(),
         Policy(trusted_orgs={"gisce"}),
         reaction_ok=True,
@@ -249,7 +257,12 @@ def test_live_dispatch_streams_partial_openclaw_output_before_process_exits(tmp_
     monkeypatch.setenv("DONE_FILE", str(done))
     callback_observed_done = []
 
-    result = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1).dispatch(
+    result = OpenClawDispatcher(
+        openclaw_bin=str(openclaw),
+        mode=RunMode.LIVE,
+        cli_grace_seconds=1,
+        systemd_run_bin=None,
+    ).dispatch(
         make_job(),
         Policy(trusted_orgs={"gisce"}),
         reaction_ok=True,
@@ -275,7 +288,12 @@ def test_dispatcher_shutdown_terminates_active_process_group(tmp_path, monkeypat
     )
     openclaw.chmod(0o755)
     monkeypatch.setenv("STARTED_FILE", str(started))
-    dispatcher = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1)
+    dispatcher = OpenClawDispatcher(
+        openclaw_bin=str(openclaw),
+        mode=RunMode.LIVE,
+        cli_grace_seconds=1,
+        systemd_run_bin=None,
+    )
     results = []
     thread = threading.Thread(
         target=lambda: results.append(dispatcher.dispatch(make_job(), Policy(trusted_orgs={"gisce"}))),

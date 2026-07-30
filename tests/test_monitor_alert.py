@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from github_agent_bridge import monitor_alert
+from github_agent_bridge.models import Notification
+from github_agent_bridge.policy import Policy
+from github_agent_bridge.queue import JobQueue
 
 
 def make_config(tmp_path: Path) -> monitor_alert.AlertConfig:
@@ -41,36 +45,27 @@ def test_load_state_accepts_legacy_shell_format(tmp_path):
     assert monitor_alert.load_state(state_file) == ("abc", 123)
 
 
-def test_maybe_unlock_stale_blocks_when_executor_has_no_children(tmp_path, monkeypatch):
+def test_maybe_unlock_stale_is_alert_only_without_per_job_kill_enabled(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     calls = []
     monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
     monkeypatch.setattr(monitor_alert, "has_child_processes", lambda pid: False)
 
-    def fake_run(args, check=False):
-        calls.append(args)
-        return type("Proc", (), {"stdout": '{"blocked":[7],"count":1}\n'})()
-
-    monkeypatch.setattr(monitor_alert, "_run", fake_run)
+    monkeypatch.setattr(monitor_alert, "_run", lambda args, check=False: calls.append(args))
 
     output = monitor_alert.maybe_unlock_stale(config, "running job 7 owner/repo#1 age 1200s > 900s")
 
-    assert output == '{"blocked":[7],"count":1}\n'
-    assert "block-running" in calls[0]
-    assert calls[0][-2:] == ["--job-id", "7"]
+    assert output == ""
+    assert calls == []
 
 
-def test_maybe_unlock_stale_blocks_no_child_running_detail_ids(tmp_path, monkeypatch):
+def test_no_child_alert_does_not_treat_all_running_detail_rows_as_orphans(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     calls = []
     monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
     monkeypatch.setattr(monitor_alert, "has_child_processes", lambda pid: False)
 
-    def fake_run(args, check=False):
-        calls.append(args)
-        return type("Proc", (), {"stdout": '{"blocked":[568,570],"count":2}' + "\n"})()
-
-    monkeypatch.setattr(monitor_alert, "_run", fake_run)
+    monkeypatch.setattr(monitor_alert, "_run", lambda args, check=False: calls.append(args))
 
     output = monitor_alert.maybe_unlock_stale(
         config,
@@ -83,12 +78,11 @@ def test_maybe_unlock_stale_blocks_no_child_running_detail_ids(tmp_path, monkeyp
         ),
     )
 
-    assert output == '{"blocked":[568,570],"count":2}\n'
-    assert "block-running" in calls[0]
-    assert calls[0][-4:] == ["--job-id", "568", "--job-id", "570"]
+    assert output == ""
+    assert calls == []
 
 
-def test_maybe_unlock_stale_uses_no_child_alert_code_for_detail_ids(tmp_path, monkeypatch):
+def test_no_child_alert_code_does_not_expand_to_unrelated_running_details(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     calls = []
     monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
@@ -110,12 +104,11 @@ def test_maybe_unlock_stale_uses_no_child_alert_code_for_detail_ids(tmp_path, mo
         ),
     )
 
-    assert output == '{"blocked":[568],"count":1}\n'
-    assert "block-running" in calls[0]
-    assert calls[0][-2:] == ["--job-id", "568"]
+    assert output == ""
+    assert calls == []
 
 
-def test_maybe_unlock_stale_kills_children_and_blocks_jobs_when_enabled(tmp_path, monkeypatch):
+def test_maybe_unlock_stale_never_stops_job_based_on_age_alone(tmp_path, monkeypatch):
     base = make_config(tmp_path)
     config = monitor_alert.AlertConfig(
         bridge_bin=base.bridge_bin,
@@ -136,22 +129,18 @@ def test_maybe_unlock_stale_kills_children_and_blocks_jobs_when_enabled(tmp_path
         proc_idle_seconds=base.proc_idle_seconds,
     )
     monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
-    monkeypatch.setattr(monitor_alert, "has_child_processes", lambda pid: True)
-    monkeypatch.setattr(monitor_alert, "child_pids", lambda pid: [456])
-    monkeypatch.setattr(monitor_alert, "sample_executor_activity", lambda config, main_pid=None, now=None: "proc sample\n")
-    monkeypatch.setattr(monitor_alert, "load_proc_state", lambda path: {"active_since_last_sample": False, "idle_seconds": 300})
-    monkeypatch.setattr(monitor_alert, "terminate_process_group", lambda pid, grace: f"pid {pid}: killed")
-
-    def fake_run(args, check=False):
-        return type("Proc", (), {"stdout": "{\"blocked\":[7],\"count\":1}\n"})()
-
-    monkeypatch.setattr(monitor_alert, "_run", fake_run)
+    calls = []
+    monkeypatch.setattr(monitor_alert, "_run", lambda args, check=False: calls.append(args))
+    monkeypatch.setattr(
+        monitor_alert,
+        "sample_executor_activity",
+        lambda config, main_pid=None, now=None: "proc sample\n",
+    )
 
     output = monitor_alert.maybe_unlock_stale(config, "running job 7 owner/repo#1 age 1200s > 900s")
 
-    assert "pid 456: killed" in output
-    assert '{"blocked":[7],"count":1}' in output
-    assert "requeued" not in output
+    assert output == "proc sample\n"
+    assert calls == []
 
 
 def test_maybe_unlock_stale_blocks_jobs_when_executor_is_inactive(tmp_path, monkeypatch):
@@ -172,14 +161,18 @@ def test_maybe_unlock_stale_blocks_jobs_when_executor_is_inactive(tmp_path, monk
     assert "unlock-stale" not in calls[0]
 
 
-def test_process_mismatch_restarts_complete_executor_cgroup_and_blocks_without_age_gate(tmp_path, monkeypatch):
+def test_process_mismatch_stops_only_job_scope_and_blocks_without_age_gate(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     calls = []
-    monkeypatch.setattr(monitor_alert, "get_main_pid", lambda unit="github-agent-bridge.service": "123")
+    unit = "github-agent-bridge-job-7-attempt-2.scope"
+    monkeypatch.setattr(monitor_alert, "runtime_scope_for_job", lambda config, job_id: unit)
+    active_states = iter(["active", "inactive"])
 
     def fake_run(args, check=False):
         calls.append(args)
-        if "restart" in args:
+        if "is-active" in args:
+            return type("Proc", (), {"stdout": next(active_states) + "\n", "returncode": 0})()
+        if "stop" in args:
             return type("Proc", (), {"stdout": "", "returncode": 0})()
         return type("Proc", (), {"stdout": '{"blocked":[7],"count":1}\n', "returncode": 0})()
 
@@ -194,11 +187,93 @@ def test_process_mismatch_restarts_complete_executor_cgroup_and_blocks_without_a
         ),
     )
 
-    assert calls[0] == ["systemctl", "--user", "restart", "github-agent-bridge.service"]
-    assert "block-running" in calls[1]
-    assert calls[1][calls[1].index("--older-than") + 1] == "0"
-    assert "executor cgroup restart rc=0" in output
+    assert ["systemctl", "--user", "restart", "github-agent-bridge.service"] not in calls
+    assert calls[0] == ["systemctl", "--user", "is-active", unit]
+    assert calls[1] == ["systemctl", "--user", "stop", unit]
+    assert calls[2] == ["systemctl", "--user", "is-active", unit]
+    assert "block-running" in calls[3]
+    assert calls[3][calls[3].index("--older-than") + 1] == "0"
+    assert f"stopped isolated scope {unit}" in output
     assert '"blocked":[7]' in output
+
+
+def test_process_mismatch_selects_only_explicitly_mismatched_job():
+    output = "\n".join(
+        [
+            "- [monitor.running_process_mismatch] running job 7 process ownership mismatch: PID 456 is dead",
+            "- running detail: job=7 key=owner/repo#1",
+            "- running detail: job=8 key=owner/repo#2",
+        ]
+    )
+
+    assert monitor_alert.process_mismatch_job_ids(output) == ["7"]
+
+
+def test_process_mismatch_without_validated_scope_does_not_kill_or_block(tmp_path, monkeypatch):
+    config = make_config(tmp_path)
+    calls = []
+    monkeypatch.setattr(monitor_alert, "runtime_scope_for_job", lambda config, job_id: None)
+    monkeypatch.setattr(
+        monitor_alert,
+        "_run",
+        lambda args, check=False: calls.append(args),
+    )
+
+    output = monitor_alert.reconcile_process_mismatch(config, ["7"])
+
+    assert calls == []
+    assert "left running for manual inspection" in output
+
+
+def test_runtime_scope_for_job_requires_exact_job_attempt_unit(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    queue = JobQueue(db)
+    notification = Notification(
+        uid=1,
+        message_id="<scope-test@github.com>",
+        subject="Re: [owner/repo] Scope test",
+        from_addr="notifications@github.com",
+        body="@pilipilisbot https://github.com/owner/repo/issues/1#issuecomment-1",
+        auth={"spf": True, "dkim": True, "dmarc": True},
+    )
+    queued, _ = queue.enqueue(
+        notification,
+        Policy(trusted_orgs={"owner"}, bot_logins={"pilipilisbot"}),
+    )
+    assert queued is not None
+    worker_id = "executor-123-deadbeef/worker-0"
+    job = queue.claim_next(worker_id)
+    assert job is not None
+    unit = f"github-agent-bridge-job-{job.id}-attempt-{job.attempts}.scope"
+    queue.register_runtime_process(
+        job.id,
+        worker_id,
+        "executor-123-deadbeef",
+        {
+            "pid": 456,
+            "ppid": 789,
+            "pgid": 456,
+            "sid": 456,
+            "start_time_ticks": 999,
+            "launcher_pid": 789,
+            "unit": unit,
+            "control_group": f"/user.slice/{unit}",
+        },
+    )
+    config = replace(make_config(tmp_path), db=str(db))
+
+    assert monitor_alert.runtime_scope_for_job(config, str(job.id)) == unit
+
+    with queue.connect() as con:
+        row = con.execute("SELECT metadata_json FROM jobs WHERE id=?", (job.id,)).fetchone()
+        metadata = monitor_alert.json.loads(row["metadata_json"])
+        metadata["runtime_process"]["unit"] = "github-agent-bridge-job-999-attempt-1.scope"
+        con.execute(
+            "UPDATE jobs SET metadata_json=? WHERE id=?",
+            (monitor_alert.json.dumps(metadata), job.id),
+        )
+
+    assert monitor_alert.runtime_scope_for_job(config, str(job.id)) is None
 
 
 def test_sample_executor_activity_tracks_all_executor_children(tmp_path, monkeypatch):

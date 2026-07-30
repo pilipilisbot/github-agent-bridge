@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from .dashboard_data import inspect_db_read_only
+from .job_isolation import is_expected_job_scope
 from .observability import DEFAULT_PROCESS_SAMPLE_RETENTION_SECONDS, recent_process_samples, record_monitor_observation
-from .process_inspection import direct_children, process_identity_matches
+from .process_inspection import direct_children, process_cgroup, process_identity_matches
 
 
 ALERT_RELEASE_AVAILABLE = "monitor.release_available"
@@ -89,7 +90,8 @@ class MonitorReport:
                     "- runtime detail: "
                     f"job={job.get('id')} state={runtime.get('state', '-')} "
                     f"pid={runtime.get('pid', '-')} ppid={runtime.get('ppid', '-')} "
-                    f"pgid={runtime.get('pgid', '-')} sid={runtime.get('sid', '-')}"
+                    f"pgid={runtime.get('pgid', '-')} sid={runtime.get('sid', '-')} "
+                    f"unit={runtime.get('unit', '-')}"
                 )
         children = metrics.get("executor_children") or []
         if children:
@@ -290,11 +292,12 @@ def monitor(
             _add_alert(metrics, alerts, ALERT_EXECUTOR_SERVICE, f"executor service is {executor_state}")
         if metrics.get("running_jobs") and executor_state == "active" and not children:
             tracking_id = metrics.get("executor_process_tracking_id")
-            expects_live_process = not tracking_id or any(
+            expects_executor_child = not tracking_id or any(
                 (job.get("runtime_process") or {}).get("state") == "running"
+                and not (job.get("runtime_process") or {}).get("unit")
                 for job in metrics.get("running_jobs", [])
             )
-            if expects_live_process:
+            if expects_executor_child:
                 _add_alert(
                     metrics,
                     alerts,
@@ -387,6 +390,26 @@ def _runtime_process_problem(
         start_time_ticks = int(runtime["start_time_ticks"])
     except (KeyError, TypeError, ValueError):
         return "runtime process identity is incomplete"
+    unit = str(runtime.get("unit") or "")
+    if unit:
+        job_id = int(job.get("id") or 0)
+        attempt = int(job.get("attempts") or 0)
+        if not is_expected_job_scope(unit, job_id, attempt):
+            return f"runtime unit {unit} does not match job {job_id} attempt {attempt}"
+        if _is_active(unit) != "active":
+            return f"job scope {unit} is not active"
+        control_group = str(runtime.get("control_group") or "")
+        if not control_group:
+            return "runtime cgroup identity is incomplete"
+        if not process_identity_matches(pid, start_time_ticks):
+            return f"PID {pid} is dead, zombie, or reused"
+        actual_control_group = process_cgroup(pid)
+        if actual_control_group != control_group:
+            return (
+                f"PID {pid} cgroup {actual_control_group or '-'} "
+                f"does not match {control_group}"
+            )
+        return None
     if ppid != executor_pid:
         return f"runtime parent {ppid} does not match executor PID {executor_pid}"
     if not process_identity_matches(pid, start_time_ticks, expected_ppid=executor_pid):

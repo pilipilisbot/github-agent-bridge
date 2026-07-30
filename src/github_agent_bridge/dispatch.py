@@ -6,6 +6,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from importlib import resources
 from enum import StrEnum
@@ -14,7 +15,8 @@ from typing import Callable
 from . import feedback
 from .models import GitHubContext, Job
 from .policy import DEFAULT_REPO_ROLE, Policy, Route, complexity_from_metadata
-from .process_inspection import process_stat
+from .job_isolation import is_expected_job_scope, is_job_scope_name, job_scope_unit
+from .process_inspection import cgroup_pids, process_stat
 from .session_correlation import (
     normalize_session_id,
     session_id_for_job,
@@ -455,6 +457,9 @@ class OpenClawDispatcher:
         work_timeout_seconds: int = 3600,
         cli_grace_seconds: int = 60,
         feedback_db_path: str | None = None,
+        systemd_run_bin: str | None = "systemd-run",
+        systemctl_bin: str = "systemctl",
+        executor_unit: str = "github-agent-bridge.service",
     ):
         self.openclaw_bin = openclaw_bin
         self.node_bin = node_bin
@@ -465,10 +470,14 @@ class OpenClawDispatcher:
         self.work_timeout_seconds = work_timeout_seconds
         self.cli_grace_seconds = cli_grace_seconds
         self.feedback_db_path = feedback_db_path
+        self.systemd_run_bin = systemd_run_bin
+        self.systemctl_bin = systemctl_bin
+        self.executor_unit = executor_unit
         self.mode = mode
         self._shutdown_event = threading.Event()
         self._process_lock = threading.Lock()
         self._active_processes: set[subprocess.Popen] = set()
+        self._active_units: set[str] = set()
 
     def shutdown(self, kill_grace_seconds: float = 5.0) -> None:
         """Cancel active CLI process groups and prevent new dispatches."""
@@ -477,6 +486,9 @@ class OpenClawDispatcher:
         self._shutdown_event.set()
         with self._process_lock:
             processes = list(self._active_processes)
+            units = list(self._active_units)
+        for unit in units:
+            self.stop_job_scope(unit)
         for proc in processes:
             self._signal_process_group(proc, signal.SIGTERM)
         if processes and kill_grace_seconds >= 0:
@@ -503,6 +515,103 @@ class OpenClawDispatcher:
             threading.Event().wait(grace_seconds)
         for proc in processes:
             self._signal_process_group(proc, signal.SIGKILL)
+
+    def stop_job_scope(self, unit: str) -> bool:
+        if not self.systemd_run_bin or not is_job_scope_name(unit):
+            return False
+        try:
+            result = subprocess.run(
+                [self.systemctl_bin, "--user", "stop", unit],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(5, self.cli_grace_seconds),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0
+
+    def stop_job(self, job: Job) -> bool:
+        runtime = job.metadata.get("runtime_process")
+        if not isinstance(runtime, dict):
+            return False
+        unit = str(runtime.get("unit") or "")
+        if not is_expected_job_scope(unit, job.id, job.attempts):
+            return False
+        return self.stop_job_scope(unit)
+
+    def _job_command(self, job: Job, agent_command: list[str], env: dict[str, str]) -> tuple[list[str], str | None]:
+        if not self.systemd_run_bin:
+            return agent_command, None
+        unit = job_scope_unit(job.id, job.attempts)
+        command = [
+            self.systemd_run_bin,
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            f"--unit={unit}",
+            "--property=KillMode=control-group",
+            f"--property=BindsTo={self.executor_unit}",
+            f"--property=PartOf={self.executor_unit}",
+            f"--property=After={self.executor_unit}",
+        ]
+        for key in (
+            "PATH",
+            "GITHUB_AGENT_BRIDGE_ACTION_MODE",
+            "GITHUB_AGENT_BRIDGE_WORK_INTENT",
+            "GITHUB_AGENT_BRIDGE_ALLOW_REPOSITORY_WRITE",
+            "GITHUB_AGENT_BRIDGE_ALLOW_PUSH",
+        ):
+            if key in env:
+                command.append(f"--setenv={key}={env[key]}")
+        command.extend(["--", *agent_command])
+        return command, unit
+
+    def _scope_process_identity(
+        self,
+        launcher_pid: int,
+        unit: str,
+        timeout_seconds: float = 10.0,
+    ) -> dict[str, int | str] | None:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                result = subprocess.run(
+                    [
+                        self.systemctl_bin,
+                        "--user",
+                        "show",
+                        unit,
+                        "--property=ControlGroup",
+                        "--value",
+                    ],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=2,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            control_group = (result.stdout or "").strip()
+            if result.returncode == 0 and control_group:
+                for pid in cgroup_pids(control_group):
+                    stat = process_stat(pid)
+                    if stat and stat.get("state") != "Z":
+                        return {
+                            "pid": pid,
+                            "ppid": int(stat["ppid"]),
+                            "pgid": int(stat["pgid"]),
+                            "sid": int(stat["sid"]),
+                            "start_time_ticks": int(stat["start_time_ticks"]),
+                            "launcher_pid": launcher_pid,
+                            "unit": unit,
+                            "control_group": control_group,
+                        }
+            threading.Event().wait(0.05)
+        return None
 
     def timeout_for(self, job: Job) -> int:
         if job.work_intent == "review_only":
@@ -575,7 +684,7 @@ class OpenClawDispatcher:
         policy: Policy,
         reaction_ok: bool | None = None,
         activity_callback: Callable[[str, str, str | None], None] | None = None,
-        process_callback: Callable[[dict[str, int]], bool | None] | None = None,
+        process_callback: Callable[[dict[str, int | str]], bool | None] | None = None,
     ) -> DispatchResult:
         agent, channel, to = self.route_for(job, policy)
         # Local embedded execution is a hard concurrency boundary: the OpenClaw
@@ -632,6 +741,7 @@ class OpenClawDispatcher:
         env["GITHUB_AGENT_BRIDGE_ALLOW_PUSH"] = "1" if job.work_intent == "work_allowed" else "0"
         if self.node_bin:
             env["PATH"] = os.path.dirname(self.node_bin) + os.pathsep + env.get("PATH", "")
+        cmd, unit = self._job_command(job, cmd, env)
         if self.mode != RunMode.LIVE:
             return DispatchResult(True, 0, "side effects skipped", "", False, reaction_ok, cmd)
         with self._process_lock:
@@ -639,24 +749,37 @@ class OpenClawDispatcher:
                 return DispatchResult(False, 130, "", "executor shutdown requested before dispatch", False, reaction_ok, cmd, True)
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, start_new_session=True)
             self._active_processes.add(proc)
+            if unit:
+                self._active_units.add(unit)
         if process_callback:
-            stat = process_stat(proc.pid)
-            identity = {
-                "pid": proc.pid,
-                "ppid": int(stat["ppid"]) if stat else os.getpid(),
-                "pgid": int(stat["pgid"]) if stat else proc.pid,
-                "sid": int(stat["sid"]) if stat else proc.pid,
-                "start_time_ticks": int(stat["start_time_ticks"]) if stat else 0,
-            }
+            if unit:
+                identity = self._scope_process_identity(proc.pid, unit)
+            else:
+                stat = process_stat(proc.pid)
+                identity = (
+                    {
+                        "pid": proc.pid,
+                        "ppid": int(stat["ppid"]),
+                        "pgid": int(stat["pgid"]),
+                        "sid": int(stat["sid"]),
+                        "start_time_ticks": int(stat["start_time_ticks"]),
+                    }
+                    if stat
+                    else None
+                )
             try:
-                registered = bool(stat) and process_callback(identity) is not False
+                registered = identity is not None and process_callback(identity) is not False
             except Exception:
                 registered = False
             if not registered:
+                if unit:
+                    self.stop_job_scope(unit)
                 self._signal_process_group(proc, signal.SIGKILL)
                 proc.wait()
                 with self._process_lock:
                     self._active_processes.discard(proc)
+                    if unit:
+                        self._active_units.discard(unit)
                 return DispatchResult(
                     False,
                     125,
@@ -694,9 +817,12 @@ class OpenClawDispatcher:
                 stdout_thread.join(timeout=1)
                 stderr_thread.join(timeout=1)
                 out, err = "".join(stdout_chunks), "".join(stderr_chunks)
-                cancelled = self._shutdown_event.is_set() and proc.returncode != 0
-                return DispatchResult(proc.returncode == 0, proc.returncode, (out or "")[:2000], (err or "")[:4000], False, reaction_ok, cmd, cancelled)
+                cancelled = self._shutdown_event.is_set()
+                returncode = 130 if cancelled and proc.returncode == 0 else proc.returncode
+                return DispatchResult(not cancelled and returncode == 0, returncode, (out or "")[:2000], (err or "")[:4000], False, reaction_ok, cmd, cancelled)
             except subprocess.TimeoutExpired:
+                if unit:
+                    self.stop_job_scope(unit)
                 self._signal_process_group(proc, signal.SIGKILL)
                 proc.wait()
                 stdout_thread.join(timeout=1)
@@ -706,3 +832,5 @@ class OpenClawDispatcher:
         finally:
             with self._process_lock:
                 self._active_processes.discard(proc)
+                if unit:
+                    self._active_units.discard(unit)

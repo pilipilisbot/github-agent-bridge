@@ -81,14 +81,14 @@ class ExecutorPool:
                 ack_ok = self.github.react_ack_no_comment(job.context)
                 summary = "non-actionable review; skipped dispatch"
                 detail = f"eyes={reaction_ok} ack={ack_ok}"
-                self.queue.finish(job.id, "done", summary, detail)
+                self.queue.finish(job.id, "done", summary, detail, expected_locked_by=worker_id)
                 return True
             if job.action == "reply_comment" and job.context.comment_id and not assigned_to_bot and not self.github.issue_comment_addresses_current_user(job.context):
                 reaction_ok = self.react_eyes_for_job_contexts(job)
                 ack_ok = self.github.react_ack_no_comment(job.context)
                 summary = "comment not addressed to bot and bot not assigned; skipped dispatch"
                 detail = f"eyes={reaction_ok} ack={ack_ok}"
-                self.queue.finish(job.id, "done", summary, detail)
+                self.queue.finish(job.id, "done", summary, detail, expected_locked_by=worker_id)
                 return True
             if job.action == "reply_comment" and job.work_intent == "review_only" and (assigned_to_bot or authored_by_bot):
                 reason = "PR/issue assigned to authenticated bot" if assigned_to_bot else "PR authored by authenticated bot"
@@ -142,11 +142,11 @@ class ExecutorPool:
                     if job.attempts <= self.config.missing_followup_retries:
                         self.queue.requeue_running(job.id, "agent finished without visible GitHub follow-up; auto-requeued", detail)
                         return True
-                    self._finish(job, "blocked", summary, detail, notify_completion=True)
+                    self._finish(job, worker_id, "blocked", summary, detail, notify_completion=True)
                     return True
                 summary = "👀 reaction ok + agent dispatch queued" if reaction_ok else "agent dispatch queued; reaction failed or unavailable"
                 detail = f"followup_url={followup_url}; {result.detail}" if followup_url else result.detail
-                self._finish(job, "done", summary, detail, notify_completion=True, followup_url=followup_url)
+                self._finish(job, worker_id, "done", summary, detail, notify_completion=True, followup_url=followup_url)
             else:
                 reason = (
                     "executor shutdown interrupted dispatch"
@@ -159,7 +159,7 @@ class ExecutorPool:
                 if followup_url:
                     summary = "dispatch failed after producing visible GitHub follow-up"
                     detail = f"followup_url={followup_url}; {reason}; {result.detail}"
-                    self._finish(job, "blocked", summary, detail, notify_completion=True, followup_url=followup_url)
+                    self._finish(job, worker_id, "blocked", summary, detail, notify_completion=True, followup_url=followup_url)
                     return True
                 if self._dispatch_failure_is_retryable(result) and job.attempts <= self.config.transient_dispatch_retries:
                     self.queue.requeue_running(
@@ -169,14 +169,15 @@ class ExecutorPool:
                         fresh_session=self._dispatch_failure_needs_fresh_session(result),
                     )
                     return True
-                self._finish(job, "blocked", reason, result.detail, notify_completion=True)
+                self._finish(job, worker_id, "blocked", reason, result.detail, notify_completion=True)
         except Exception as exc:
-            self._finish(job, "blocked", f"executor exception: {type(exc).__name__}", str(exc), notify_completion=dispatched)
+            self._finish(job, worker_id, "blocked", f"executor exception: {type(exc).__name__}", str(exc), notify_completion=dispatched)
         return True
 
     def _finish(
         self,
         job,
+        worker_id: str,
         status: str,
         summary: str,
         detail: str | None = None,
@@ -184,7 +185,15 @@ class ExecutorPool:
         notify_completion: bool = False,
         followup_url: str | None = None,
     ) -> None:
-        self.queue.finish(job.id, status, summary, detail)
+        finished = self.queue.finish(
+            job.id,
+            status,
+            summary,
+            detail,
+            expected_locked_by=worker_id,
+        )
+        if not finished:
+            return
         if not notify_completion:
             return
         actors = [actor for actor in [job.trigger_actor, *self.queue.coalesced_trigger_actors(job.id)] if actor]
@@ -287,6 +296,10 @@ class ExecutorPool:
         worker_ids = [f"{self.executor_id}/worker-{i}" for i in range(worker_count)]
         threads: list[threading.Thread] = []
         try:
+            stop_job = getattr(self.dispatcher, "stop_job", None)
+            if callable(stop_job):
+                for orphaned_job in self.queue.list_jobs(status="running", limit=1_000_000):
+                    stop_job(orphaned_job)
             self.queue.block_running(
                 "orphaned running job recovered at executor startup",
                 "No prior executor process owns this running job. It was blocked, not auto-requeued, to avoid duplicate external actions.",
