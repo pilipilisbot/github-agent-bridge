@@ -237,6 +237,30 @@ def test_claim_can_filter_by_work_intent(tmp_path):
     assert claimed.work_intent == "review_only"
 
 
+def test_cancel_running_records_actor_reason_and_finish_preserves_cancellation(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    claimed = q.claim_next("worker")
+    assert claimed is not None
+
+    requested = q.request_cancel_running(claimed.id, actor="ecarreras", reason="stale request")
+    assert requested is not None
+    assert requested.metadata["cancellation"]["state"] == "requested"
+
+    cancelled = q.mark_cancelled(claimed.id, actor="ecarreras", reason="stale request", signal_detail="sent SIGTERM", followup_url="https://github.com/gisce/erp/issues/1#issuecomment-2")
+    assert cancelled is not None
+    assert cancelled.status == "blocked"
+    assert cancelled.metadata["cancellation"]["state"] == "cancelled"
+    assert cancelled.metadata["cancellation"]["actor"] == "ecarreras"
+    assert "stale request" in (cancelled.last_error or "")
+
+    q.finish(claimed.id, "done", "late dispatch completion", "ok")
+    stored = q.get(claimed.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert "stale request" in (stored.last_error or "")
+
+
 def test_claim_fresh_review_retry_records_attempt_session_id(tmp_path):
     q = JobQueue(tmp_path / "q.sqlite3")
     job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())

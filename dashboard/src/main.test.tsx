@@ -450,6 +450,7 @@ describe("status badges", () => {
         onBackToDashboard={onBackToDashboard}
         onRetry={vi.fn()}
         onDismiss={vi.fn()}
+        onCancel={vi.fn()}
         onRefresh={vi.fn()}
       />,
     );
@@ -639,6 +640,56 @@ describe("status badges", () => {
     confirm.mockRestore();
   });
 
+  it("lets admins cancel running jobs from the jobs list with an optional reason", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn().mockResolvedValue(undefined);
+    const onViewJob = vi.fn();
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("operator requested stop");
+
+    render(
+      <JobsList
+        jobs={[
+          {
+            id: 58,
+            work_key: "pilipilisbot/github-agent-bridge#58",
+            repo: "pilipilisbot/github-agent-bridge",
+            thread: 58,
+            status: "running",
+            action: "reply_comment",
+            decision: "allowed",
+            intent: "work_allowed",
+            subject: "Needs cancellation from the list",
+            trigger_actor: "ecarreras",
+            trigger_actor_avatar_url: null,
+            attempts: 1,
+            coalesced_count: 1,
+            last_error: null,
+            locked_by: "worker-1",
+            created_at: "2026-05-31T19:11:06Z",
+            updated_at: "2026-05-31T19:11:06Z",
+            started_at: "2026-05-31T19:11:30Z",
+            finished_at: null,
+            queue_wait_seconds: 24,
+            runtime_seconds: null,
+            github_urls: [],
+          },
+        ]}
+        loading={false}
+        now={Date.parse("2026-05-31T19:12:00Z")}
+        onViewJob={onViewJob}
+        onCancel={onCancel}
+        user={{ login: "admin", avatar_url: "", html_url: "https://github.com/admin", is_admin: true }}
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "Cancel job #58" })[0]);
+
+    expect(prompt).toHaveBeenCalledWith("Cancel job #58? Optional reason:");
+    expect(onCancel).toHaveBeenCalledWith(58, "operator requested stop");
+    expect(onViewJob).not.toHaveBeenCalled();
+    prompt.mockRestore();
+  });
+
   it("hides list retry actions from read-only users and non-retryable jobs", () => {
     render(
       <JobsList
@@ -667,18 +718,44 @@ describe("status badges", () => {
             runtime_seconds: null,
             github_urls: [],
           },
+          {
+            id: 59,
+            work_key: "pilipilisbot/github-agent-bridge#59",
+            repo: "pilipilisbot/github-agent-bridge",
+            thread: 59,
+            status: "running",
+            action: "reply_comment",
+            decision: "allowed",
+            intent: "work_allowed",
+            subject: "Running jobs owned by another actor cannot be cancelled",
+            trigger_actor: "ecarreras",
+            trigger_actor_avatar_url: null,
+            attempts: 1,
+            coalesced_count: 1,
+            last_error: null,
+            locked_by: "worker-1",
+            created_at: "2026-05-31T19:11:06Z",
+            updated_at: "2026-05-31T19:11:06Z",
+            started_at: "2026-05-31T19:11:30Z",
+            finished_at: null,
+            queue_wait_seconds: 24,
+            runtime_seconds: null,
+            github_urls: [],
+          },
         ]}
         loading={false}
         now={Date.parse("2026-05-31T19:12:00Z")}
         onViewJob={() => undefined}
         onRetry={vi.fn()}
         onDismiss={vi.fn()}
+        onCancel={vi.fn()}
         user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
       />,
     );
 
     expect(screen.queryByRole("button", { name: "Retry job #58" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Dismiss job #58" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel job #59" })).not.toBeInTheDocument();
   });
 });
 
