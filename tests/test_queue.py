@@ -261,6 +261,32 @@ def test_cancel_running_records_actor_reason_and_finish_preserves_cancellation(t
     assert "stale request" in (stored.last_error or "")
 
 
+def test_mark_cancelled_handles_finish_after_cancel_request(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    claimed = q.claim_next("worker")
+    assert claimed is not None
+
+    requested = q.request_cancel_running(claimed.id, actor="ecarreras", reason="stale request")
+    assert requested is not None
+
+    q.finish(claimed.id, "done", "late dispatch completion", "ok")
+
+    cancelled = q.mark_cancelled(
+        claimed.id,
+        actor="ecarreras",
+        reason="stale request",
+        signal_detail="runtime already exited",
+        followup_url="https://github.com/gisce/erp/issues/1#issuecomment-2",
+    )
+
+    assert cancelled is not None
+    assert cancelled.status == "blocked"
+    assert cancelled.metadata["cancellation"]["state"] == "cancelled"
+    assert cancelled.metadata["cancellation"]["signal_detail"] == "runtime already exited"
+    assert "followup_url=https://github.com/gisce/erp/issues/1#issuecomment-2" in (cancelled.last_error or "")
+
+
 def test_claim_fresh_review_retry_records_attempt_session_id(tmp_path):
     q = JobQueue(tmp_path / "q.sqlite3")
     job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
