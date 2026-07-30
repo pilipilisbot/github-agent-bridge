@@ -292,6 +292,14 @@ groups or sessions, but they remain in the service cgroup and are therefore
 terminated together. `KillMode=control-group` and `TimeoutStopSec=30s` in the
 executor unit make that cleanup explicit.
 
+Bridge jobs use OpenClaw's local embedded mode. Agent and tool processes
+therefore remain descendants of the executor worker instead of being owned and
+recoverable by the gateway. `KillMode=control-group` can terminate the complete
+job tree, and the configured worker count is also the global concurrency limit
+for bridge work. Every job attempt also receives a unique OpenClaw session key,
+so stale session state from an earlier gateway-dispatched run cannot race or
+resume the new attempt.
+
 Set `GITHUB_AGENT_BRIDGE_KILL_STALE_CHILDREN=1` in the private systemd env file
 to let `github-agent-bridge-monitor-alert` terminate stale executor child
 process groups before retrying stalled jobs. The wrapper samples every direct

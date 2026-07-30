@@ -20,7 +20,6 @@ from .session_correlation import (
     session_id_for_job,
     session_id_for_job_attempt,
     session_key_for_rescue,
-    session_key_for_work,
 )
 
 PROMPT_RULES_PACKAGE = "github_agent_bridge.prompt_rules"
@@ -579,7 +578,11 @@ class OpenClawDispatcher:
         process_callback: Callable[[dict[str, int]], bool | None] | None = None,
     ) -> DispatchResult:
         agent, channel, to = self.route_for(job, policy)
-        cmd = [self.openclaw_bin, "agent"]
+        # Local embedded execution is a hard concurrency boundary: the OpenClaw
+        # process and every tool it starts remain descendants of this worker.
+        # Gateway-dispatched sessions can be recovered independently and would
+        # otherwise escape both the worker limit and this service's cgroup.
+        cmd = [self.openclaw_bin, "agent", "--local"]
         if agent:
             cmd += ["--agent", agent]
         model_route = policy.model_route_for(
@@ -594,11 +597,11 @@ class OpenClawDispatcher:
             cmd += ["--thinking", model_route.thinking]
         agent_timeout = self.timeout_for(job)
         fresh_session = bool(job.metadata.get("fresh_session_on_retry")) and job.attempts > 1
-        session_key = (
-            session_key_for_rescue(job.work_key, job.id, job.attempts)
-            if fresh_session
-            else session_key_for_work(job.work_key)
-        )
+        # An attempt must never share mutable session state with a prior
+        # gateway-dispatched run. Reusing the thread key lets a recovered or
+        # stale session race local startup ("session changed while starting")
+        # even though its process is now correctly contained.
+        session_key = session_key_for_rescue(job.work_key, job.id, job.attempts)
         if fresh_session or job.work_intent == "work_allowed":
             default_session_id = session_id_for_job_attempt(job.id, job.attempts)
             session_id = normalize_session_id(default_session_id)
