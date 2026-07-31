@@ -358,6 +358,7 @@ class JobQueue:
                 con.commit()
                 return None
             metadata = json.loads(row["metadata_json"] or "{}")
+            existing_cancellation = metadata.get("cancellation")
             metadata["cancellation"] = {
                 "state": "cancelled",
                 "actor": clean_actor,
