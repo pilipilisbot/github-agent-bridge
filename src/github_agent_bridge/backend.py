@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from contextlib import asynccontextmanager, suppress
 import json
 import os
 import secrets
@@ -245,13 +246,28 @@ def _bearer_token(request: Request) -> str:
     return token.strip()
 
 
-async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int | None = None, sleep_seconds: float = 2.0):
+async def _sleep_or_shutdown(shutdown_event: asyncio.Event | None, sleep_seconds: float) -> bool:
+    if shutdown_event is None:
+        await asyncio.sleep(sleep_seconds)
+        return False
+    if shutdown_event.is_set():
+        return True
+    try:
+        await asyncio.wait_for(shutdown_event.wait(), timeout=sleep_seconds)
+    except asyncio.TimeoutError:
+        return False
+    return True
+
+
+async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int | None = None, sleep_seconds: float = 2.0, shutdown_event: asyncio.Event | None = None):
     last_id = after_id or 0
     sent_transcript_keys: set[str] = set()
-    while True:
+    while shutdown_event is None or not shutdown_event.is_set():
         emitted = False
         events = job_session_events(db, job_id, after_id=last_id, limit=100)
         for event in events:
+            if shutdown_event is not None and shutdown_event.is_set():
+                return
             last_id = int(event["id"])
             emitted = True
             yield _sse_event("session_event", event, event_id=last_id)
@@ -263,6 +279,8 @@ async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int |
                     yield _sse_event("transcript_entry", {"job_id": job_id, "entry": entry})
         transcript = job_session_transcript(db, job_id, limit=500)
         for entry in transcript:
+            if shutdown_event is not None and shutdown_event.is_set():
+                return
             key = _transcript_sse_key(entry)
             if key in sent_transcript_keys:
                 continue
@@ -271,13 +289,40 @@ async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int |
             yield _sse_event("transcript_entry", {"job_id": job_id, "entry": entry})
         if not emitted:
             yield _sse_event("session_heartbeat", {"job_id": job_id, "last_event_id": last_id})
-        await asyncio.sleep(sleep_seconds)
+        if await _sleep_or_shutdown(shutdown_event, sleep_seconds):
+            return
 
 
-async def _journal_stream_events(unit: str):
+async def _journal_stream_events(unit: str, *, shutdown_event: asyncio.Event | None = None):
     try:
-        async for line in stream_journal_lines(unit):
-            yield _sse_event("journal_line", {"unit": unit, "line": line})
+        stream = stream_journal_lines(unit)
+        try:
+            while shutdown_event is None or not shutdown_event.is_set():
+                line_task = asyncio.create_task(anext(stream))
+                if shutdown_event is None:
+                    try:
+                        line = await line_task
+                    except StopAsyncIteration:
+                        return
+                else:
+                    shutdown_task = asyncio.create_task(shutdown_event.wait())
+                    done, pending = await asyncio.wait({line_task, shutdown_task}, return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+                    if shutdown_task in done:
+                        line_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await line_task
+                        return
+                    try:
+                        line = line_task.result()
+                    except StopAsyncIteration:
+                        return
+                yield _sse_event("journal_line", {"unit": unit, "line": line})
+        finally:
+            await stream.aclose()
     except FileNotFoundError:
         yield _sse_event("journal_error", {"unit": unit, "error": "journalctl_not_found"})
 
@@ -413,8 +458,19 @@ def _is_admin(config: DashboardConfig, login: str, token: str | None = None) -> 
 def create_app(config: DashboardConfig | None = None) -> FastAPI:
     configure_sentry(service="dashboard")
     config = config or DashboardConfig()
-    app = FastAPI(title="GitHub Agent Bridge Dashboard API")
+    shutdown_event = asyncio.Event()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.dashboard_shutdown_event = shutdown_event
+        try:
+            yield
+        finally:
+            shutdown_event.set()
+
+    app = FastAPI(title="GitHub Agent Bridge Dashboard API", lifespan=lifespan)
     app.state.dashboard_config = config
+    app.state.dashboard_shutdown_event = shutdown_event
     assets_dir = config.static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="dashboard-assets")
@@ -759,7 +815,11 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if job_session(config.db, job_id) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
 
-        return StreamingResponse(_session_stream_events(config.db, job_id, after_id=after_id), media_type="text/event-stream", headers=_sse_headers())
+        return StreamingResponse(
+            _session_stream_events(config.db, job_id, after_id=after_id, shutdown_event=app.state.dashboard_shutdown_event),
+            media_type="text/event-stream",
+            headers=_sse_headers(),
+        )
 
     @app.get("/api/metrics/summary")
     def api_metrics(timezone: str = "UTC", _: str = Depends(current_user)) -> dict[str, Any]:
@@ -805,7 +865,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     def api_systemd_journal_stream(unit: str, _: str = Depends(current_user)) -> StreamingResponse:
         if unit not in allowed_unit_names():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="systemd_unit_not_allowed")
-        return StreamingResponse(_journal_stream_events(unit), media_type="text/event-stream", headers=_sse_headers())
+        return StreamingResponse(_journal_stream_events(unit, shutdown_event=app.state.dashboard_shutdown_event), media_type="text/event-stream", headers=_sse_headers())
 
     @app.get("/api/alerts")
     def api_alerts(include_resolved: bool = False, limit: int = 50, _: str = Depends(current_user)) -> dict[str, Any]:
