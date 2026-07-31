@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.58.1 (2026-07-31)
+
+### Bug Fixes
+
+- Handle cancellation finish race
+  ([`99e3de7`](https://github.com/pilipilisbot/github-agent-bridge/commit/99e3de7a073c8e168eeb280d7ed164aee69be4e2))
+
+
 ## v0.58.0 (2026-07-30)
 
 ### Features
