@@ -320,6 +320,10 @@ progress so operators can tell whether a running job is merely alive or actually
 making useful progress.
 The System page lists configured user-level systemd units and lets operators
 expand a unit row to follow its live journal tail in place.
+When the dashboard process receives a shutdown request, active SSE streams for
+job sessions and journal tails are signaled to close promptly. This lets
+dashboard-only autoupdates restart the FastAPI service without waiting for
+long-lived browser streams to hit the systemd stop timeout.
 Timestamps stay stored and returned by the API in UTC, while the browser renders
 them in the viewer's local timezone from `Intl.DateTimeFormat`; hovering a
 rendered timestamp shows the UTC value.
