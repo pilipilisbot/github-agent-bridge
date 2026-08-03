@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.58.2 (2026-08-03)
+
+### Bug Fixes
+
+- Stop dashboard sse streams on shutdown
+  ([`3b6dcc0`](https://github.com/pilipilisbot/github-agent-bridge/commit/3b6dcc048fe1d02efd489183038484b63e9597ac))
+
+
 ## v0.58.1 (2026-07-31)
 
 ### Bug Fixes
