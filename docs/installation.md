@@ -292,6 +292,13 @@ Set `GITHUB_AGENT_BRIDGE_GITHUB_APP_ID` or
 configured on the GitHub App automatically. `GITHUB_AGENT_BRIDGE_WEB_PUSH_ICON_URL`
 can still override the notification icon with an explicit URL.
 
+When the dashboard is published through nginx, use the proxy settings from
+[`operations.md`](operations.md#dashboard-api-service) or start from
+[`nginx-dashboard.conf`](nginx-dashboard.conf). The example keeps live SSE
+streams unbuffered and replaces nginx's generic "Bad Gateway" response with an
+auto-refreshing restart page while `github-agent-bridge-dashboard.service` is
+briefly unavailable.
+
 ```bash
 systemctl --user status github-agent-bridge-dashboard.service
 curl http://127.0.0.1:8765/api/health
