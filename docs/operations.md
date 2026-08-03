@@ -453,15 +453,33 @@ uses persisted process samples for a compact CPU history line chart when monitor
 samples exist, and falls back to the live executor snapshot otherwise.
 
 When publishing the dashboard through nginx, disable buffering for the proxied
-dashboard location so SSE events flush immediately:
+dashboard location so SSE events flush immediately. Also intercept upstream
+restart errors so browser users see a short auto-refreshing maintenance page
+instead of nginx's generic "Bad Gateway" response while the dashboard service is
+restarting. A complete example is available in
+[`nginx-dashboard.conf`](nginx-dashboard.conf).
 
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:8765;
     proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_buffering off;
     proxy_cache off;
     proxy_read_timeout 1h;
+    proxy_intercept_errors on;
+    error_page 502 503 504 = @dashboard_restarting;
+}
+
+location @dashboard_restarting {
+    internal;
+    default_type text/html;
+    add_header Cache-Control "no-store" always;
+    add_header Retry-After "5" always;
+    return 503 '<!doctype html><title>Dashboard restarting</title><meta http-equiv="refresh" content="5"><h1>Dashboard restarting</h1><p>The bridge dashboard is applying a restart. This page will retry automatically.</p>';
 }
 ```
 
