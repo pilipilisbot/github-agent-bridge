@@ -296,6 +296,8 @@ async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int |
 async def _journal_stream_events(unit: str, *, shutdown_event: asyncio.Event | None = None):
     try:
         stream = stream_journal_lines(unit)
+        line_task: asyncio.Task | None = None
+        shutdown_task: asyncio.Task | None = None
         try:
             while shutdown_event is None or not shutdown_event.is_set():
                 line_task = asyncio.create_task(anext(stream))
@@ -322,6 +324,11 @@ async def _journal_stream_events(unit: str, *, shutdown_event: asyncio.Event | N
                         return
                 yield _sse_event("journal_line", {"unit": unit, "line": line})
         finally:
+            pending_tasks = [task for task in (line_task, shutdown_task) if task is not None and not task.done()]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
             await stream.aclose()
     except FileNotFoundError:
         yield _sse_event("journal_error", {"unit": unit, "error": "journalctl_not_found"})

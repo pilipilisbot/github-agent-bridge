@@ -958,6 +958,31 @@ def test_dashboard_journal_stream_exits_when_shutdown_is_signaled(monkeypatch):
     asyncio.run(stream_until_shutdown())
 
 
+def test_dashboard_journal_stream_cancels_pending_read_when_client_disconnects(monkeypatch):
+    closed = False
+
+    async def fake_stream_journal_lines(unit):
+        nonlocal closed
+        try:
+            await asyncio.sleep(60)
+            yield "unreachable"
+        finally:
+            closed = True
+
+    async def disconnect_stream():
+        shutdown = asyncio.Event()
+        monkeypatch.setattr("github_agent_bridge.backend.stream_journal_lines", fake_stream_journal_lines)
+        stream = _journal_stream_events("github-agent-bridge-dashboard.service", shutdown_event=shutdown)
+        pending_chunk = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+        pending_chunk.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending_chunk
+        assert closed is True
+
+    asyncio.run(disconnect_stream())
+
+
 def test_dashboard_requires_auth_by_default(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     JobQueue(db)
