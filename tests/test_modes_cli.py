@@ -15,6 +15,16 @@ def test_shadow_github_reaction_has_no_external_failure():
     assert GitHubClient(gh_bin="definitely-not-present", mode=RunMode.SHADOW).react_eyes(make_job().context) is True
 
 
+def test_live_github_command_handles_missing_gh_binary():
+    client = GitHubClient(gh_bin="definitely-not-present", mode=RunMode.LIVE)
+
+    result = client._run(["api", "user"])
+
+    assert result.returncode == 127
+    assert result.stdout == ""
+    assert "definitely-not-present" in result.stderr
+
+
 class RecordingGitHubClient(GitHubClient):
     def __init__(self):
         super().__init__(mode=RunMode.LIVE)

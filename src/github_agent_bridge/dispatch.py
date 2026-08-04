@@ -111,7 +111,11 @@ class GitHubClient:
         self.gh_bin = gh_bin
 
     def _run(self, args: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([self.gh_bin, *args], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        command = [self.gh_bin, *args]
+        try:
+            return subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except FileNotFoundError as exc:
+            return subprocess.CompletedProcess(command, 127, "", str(exc))
 
     def current_login(self) -> str | None:
         result = self._run(["api", "user", "--jq", ".login"])

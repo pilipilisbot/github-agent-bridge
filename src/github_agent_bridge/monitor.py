@@ -180,7 +180,7 @@ def _latest_github_release(repo: str, timeout_seconds: float = 5.0) -> dict[str,
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
+    except (OSError, RuntimeError, urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None
