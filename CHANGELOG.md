@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.58.4 (2026-08-04)
+
+### Bug Fixes
+
+- Retry transient IMAP aborts
+  ([`73002af`](https://github.com/pilipilisbot/github-agent-bridge/commit/73002af92807b61a3b5966fa267cf4d68e3e45a6))
+
+
 ## v0.58.3 (2026-08-04)
 
 ### Bug Fixes
