@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from github_agent_bridge import __version__
 from github_agent_bridge import feedback
-from github_agent_bridge.backend import DashboardConfig, _encode_session, _is_admin, _is_allowed, _session_stream_events, _sign, create_app
+from github_agent_bridge.backend import DashboardConfig, _encode_session, _is_admin, _is_allowed, _journal_stream_events, _session_stream_events, _sign, create_app
 from github_agent_bridge.dashboard_data import get_job_detail, job_session, job_session_events, job_session_transcript, list_job_actors, list_jobs, metrics_summary
 from github_agent_bridge.monitor import MonitorReport
 from github_agent_bridge.models import GitHubContext, Notification
@@ -67,6 +67,7 @@ def test_dashboard_status_is_read_only_and_lists_recent_jobs(tmp_path):
     assert response.json()["admin_actions"] == [
         "retry_job",
         "dismiss_job",
+        "cancel_job",
         "approve_knowledge_proposal",
         "reject_knowledge_proposal",
         "update_knowledge_rule_scope",
@@ -478,6 +479,50 @@ def test_dashboard_jobs_can_filter_by_status_repo_action_intent_and_actor(tmp_pa
     assert list_jobs(db, status_filter="pending", actor="ecarreras") == []
 
 
+def test_dashboard_job_owner_can_cancel_running_job(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    job, _ = q.enqueue(notif(from_addr="ecarreras <notifications@github.com>"), Policy(trusted_orgs=["gisce"]))
+    claimed = q.claim_next("worker")
+    assert claimed is not None
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"ecarreras"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "ecarreras"})))
+
+    def fake_cancel(queue, job_id, *, actor, reason):
+        cancelled = queue.mark_cancelled(job_id, actor=actor, reason=reason, signal_detail="sent SIGTERM", followup_url="https://github.com/gisce/erp/issues/1#issuecomment-2")
+        return type("Result", (), {"cancelled": cancelled is not None, "signalled": True, "detail": "sent SIGTERM", "followup_url": "https://github.com/gisce/erp/issues/1#issuecomment-2"})()
+
+    monkeypatch.setattr("github_agent_bridge.backend.cancel_running_job", fake_cancel)
+
+    response = client.post(f"/api/jobs/{job.id}/cancel", json={"reason": "obsolete"})
+
+    assert response.status_code == 200
+    assert response.json()["detail"] == "job_cancelled"
+    assert response.json()["followup_url"] == "https://github.com/gisce/erp/issues/1#issuecomment-2"
+    stored = q.get(job.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert stored.metadata["cancellation"]["actor"] == "ecarreras"
+    assert stored.metadata["cancellation"]["reason"] == "obsolete"
+
+
+def test_dashboard_cancel_rejects_non_owner_reader(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    job, _ = q.enqueue(notif(from_addr="ecarreras <notifications@github.com>"), Policy(trusted_orgs=["gisce"]))
+    q.claim_next("worker")
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"marc"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "marc"})))
+    monkeypatch.setattr("github_agent_bridge.backend.cancel_running_job", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not cancel")))
+
+    response = client.post(f"/api/jobs/{job.id}/cancel", json={"reason": "nope"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "job_cancel_not_allowed"
+
+
 def test_dashboard_jobs_orders_active_work_before_finished_jobs(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)
@@ -860,6 +905,82 @@ def test_dashboard_sse_streams_live_trajectory_entries_before_session_file(tmp_p
     body = asyncio.run(first_chunks())
     assert "event: transcript_entry" in body
     assert "live trajectory output" in body
+
+
+def test_dashboard_sse_stream_exits_when_shutdown_is_signaled(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    job, _ = q.enqueue(notif(), Policy(trusted_orgs=["gisce"]))
+
+    async def stream_until_shutdown():
+        shutdown = asyncio.Event()
+        stream = _session_stream_events(db, job.id, sleep_seconds=60, shutdown_event=shutdown)
+        try:
+            assert "event: session_heartbeat" in await anext(stream)
+            pending_chunk = asyncio.create_task(anext(stream))
+            await asyncio.sleep(0)
+            assert not pending_chunk.done()
+            shutdown.set()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(pending_chunk, timeout=0.5)
+        finally:
+            await stream.aclose()
+
+    asyncio.run(stream_until_shutdown())
+
+
+def test_dashboard_journal_stream_exits_when_shutdown_is_signaled(monkeypatch):
+    closed = False
+
+    async def fake_stream_journal_lines(unit):
+        nonlocal closed
+        try:
+            await asyncio.sleep(60)
+            yield "unreachable"
+        finally:
+            closed = True
+
+    async def stream_until_shutdown():
+        shutdown = asyncio.Event()
+        monkeypatch.setattr("github_agent_bridge.backend.stream_journal_lines", fake_stream_journal_lines)
+        stream = _journal_stream_events("github-agent-bridge-dashboard.service", shutdown_event=shutdown)
+        try:
+            pending_chunk = asyncio.create_task(anext(stream))
+            await asyncio.sleep(0)
+            assert not pending_chunk.done()
+            shutdown.set()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(pending_chunk, timeout=0.5)
+            assert closed is True
+        finally:
+            await stream.aclose()
+
+    asyncio.run(stream_until_shutdown())
+
+
+def test_dashboard_journal_stream_cancels_pending_read_when_client_disconnects(monkeypatch):
+    closed = False
+
+    async def fake_stream_journal_lines(unit):
+        nonlocal closed
+        try:
+            await asyncio.sleep(60)
+            yield "unreachable"
+        finally:
+            closed = True
+
+    async def disconnect_stream():
+        shutdown = asyncio.Event()
+        monkeypatch.setattr("github_agent_bridge.backend.stream_journal_lines", fake_stream_journal_lines)
+        stream = _journal_stream_events("github-agent-bridge-dashboard.service", shutdown_event=shutdown)
+        pending_chunk = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+        pending_chunk.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending_chunk
+        assert closed is True
+
+    asyncio.run(disconnect_stream())
 
 
 def test_dashboard_requires_auth_by_default(tmp_path):

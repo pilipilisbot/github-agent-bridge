@@ -113,7 +113,11 @@ class GitHubClient:
         self.gh_bin = gh_bin
 
     def _run(self, args: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([self.gh_bin, *args], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        command = [self.gh_bin, *args]
+        try:
+            return subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except FileNotFoundError as exc:
+            return subprocess.CompletedProcess(command, 127, "", str(exc))
 
     def current_login(self) -> str | None:
         result = self._run(["api", "user", "--jq", ".login"])
@@ -443,6 +447,26 @@ class GitHubClient:
 
     def react_ack_no_comment(self, ctx: GitHubContext) -> bool:
         return self.react(ctx, "+1")
+
+    def comment_on_thread(self, ctx: GitHubContext, body: str) -> str | None:
+        if self.mode != RunMode.LIVE:
+            return ctx.short_url
+        repo, issue = ctx.repo, ctx.issue_number
+        if not repo or not issue:
+            return None
+        result = self._run([
+            "api",
+            "-X",
+            "POST",
+            f"repos/{repo}/issues/{issue}/comments",
+            "-f",
+            f"body={body}",
+            "--jq",
+            ".html_url",
+        ])
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
 
 
 class OpenClawDispatcher:

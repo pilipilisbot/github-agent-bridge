@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from contextlib import asynccontextmanager, suppress
 import json
 import os
 import secrets
@@ -22,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .autoupdate import apply_update_plan, complete_pending_reload, load_update_state, plan_update, record_update_plan, save_update_state
+from .cancellation import cancel_running_job
 from .cli import DEFAULT_DB
 from .feedback import (
     approve_proposal,
@@ -244,13 +246,28 @@ def _bearer_token(request: Request) -> str:
     return token.strip()
 
 
-async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int | None = None, sleep_seconds: float = 2.0):
+async def _sleep_or_shutdown(shutdown_event: asyncio.Event | None, sleep_seconds: float) -> bool:
+    if shutdown_event is None:
+        await asyncio.sleep(sleep_seconds)
+        return False
+    if shutdown_event.is_set():
+        return True
+    try:
+        await asyncio.wait_for(shutdown_event.wait(), timeout=sleep_seconds)
+    except asyncio.TimeoutError:
+        return False
+    return True
+
+
+async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int | None = None, sleep_seconds: float = 2.0, shutdown_event: asyncio.Event | None = None):
     last_id = after_id or 0
     sent_transcript_keys: set[str] = set()
-    while True:
+    while shutdown_event is None or not shutdown_event.is_set():
         emitted = False
         events = job_session_events(db, job_id, after_id=last_id, limit=100)
         for event in events:
+            if shutdown_event is not None and shutdown_event.is_set():
+                return
             last_id = int(event["id"])
             emitted = True
             yield _sse_event("session_event", event, event_id=last_id)
@@ -262,6 +279,8 @@ async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int |
                     yield _sse_event("transcript_entry", {"job_id": job_id, "entry": entry})
         transcript = job_session_transcript(db, job_id, limit=500)
         for entry in transcript:
+            if shutdown_event is not None and shutdown_event.is_set():
+                return
             key = _transcript_sse_key(entry)
             if key in sent_transcript_keys:
                 continue
@@ -270,13 +289,47 @@ async def _session_stream_events(db: str | Path, job_id: int, *, after_id: int |
             yield _sse_event("transcript_entry", {"job_id": job_id, "entry": entry})
         if not emitted:
             yield _sse_event("session_heartbeat", {"job_id": job_id, "last_event_id": last_id})
-        await asyncio.sleep(sleep_seconds)
+        if await _sleep_or_shutdown(shutdown_event, sleep_seconds):
+            return
 
 
-async def _journal_stream_events(unit: str):
+async def _journal_stream_events(unit: str, *, shutdown_event: asyncio.Event | None = None):
     try:
-        async for line in stream_journal_lines(unit):
-            yield _sse_event("journal_line", {"unit": unit, "line": line})
+        stream = stream_journal_lines(unit)
+        line_task: asyncio.Task | None = None
+        shutdown_task: asyncio.Task | None = None
+        try:
+            while shutdown_event is None or not shutdown_event.is_set():
+                line_task = asyncio.create_task(anext(stream))
+                if shutdown_event is None:
+                    try:
+                        line = await line_task
+                    except StopAsyncIteration:
+                        return
+                else:
+                    shutdown_task = asyncio.create_task(shutdown_event.wait())
+                    done, pending = await asyncio.wait({line_task, shutdown_task}, return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+                    if shutdown_task in done:
+                        line_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await line_task
+                        return
+                    try:
+                        line = line_task.result()
+                    except StopAsyncIteration:
+                        return
+                yield _sse_event("journal_line", {"unit": unit, "line": line})
+        finally:
+            pending_tasks = [task for task in (line_task, shutdown_task) if task is not None and not task.done()]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            await stream.aclose()
     except FileNotFoundError:
         yield _sse_event("journal_error", {"unit": unit, "error": "journalctl_not_found"})
 
@@ -412,8 +465,19 @@ def _is_admin(config: DashboardConfig, login: str, token: str | None = None) -> 
 def create_app(config: DashboardConfig | None = None) -> FastAPI:
     configure_sentry(service="dashboard")
     config = config or DashboardConfig()
-    app = FastAPI(title="GitHub Agent Bridge Dashboard API")
+    shutdown_event = asyncio.Event()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.dashboard_shutdown_event = shutdown_event
+        try:
+            yield
+        finally:
+            shutdown_event.set()
+
+    app = FastAPI(title="GitHub Agent Bridge Dashboard API", lifespan=lifespan)
     app.state.dashboard_config = config
+    app.state.dashboard_shutdown_event = shutdown_event
     assets_dir = config.static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="dashboard-assets")
@@ -440,6 +504,18 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if not profile:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not_authorized")
         return profile
+
+    def can_cancel_job(job_id: int, profile: dict[str, Any]) -> bool:
+        if profile.get("is_admin"):
+            return True
+        login = str(profile.get("login") or "").strip().lower()
+        if not login:
+            return False
+        job = JobQueue(config.db).get(job_id)
+        if job is None:
+            return False
+        actors = [job.trigger_actor, *JobQueue(config.db).coalesced_trigger_actors(job_id)]
+        return login in {str(actor or "").strip().lstrip("@").lower() for actor in actors if actor}
 
     async def require_dashboard_profile_or_login(request: Request) -> RedirectResponse | None:
         try:
@@ -525,6 +601,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         admin_actions = [
             "retry_job",
             "dismiss_job",
+            "cancel_job",
             "approve_knowledge_proposal",
             "reject_knowledge_proposal",
             "update_knowledge_rule_scope",
@@ -696,6 +773,31 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         job = get_job_detail(config.db, job_id)
         return {"job": job, "detail": "job_dismissed"}
 
+    @app.post("/api/jobs/{job_id}/cancel")
+    async def api_job_cancel(job_id: int, request: Request, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        if get_job_detail(config.db, job_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
+        if not can_cancel_job(job_id, profile):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="job_cancel_not_allowed")
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cancel_payload_required")
+        reason = str(payload.get("reason") or "").strip() or None
+        result = cancel_running_job(JobQueue(config.db), job_id, actor=str(profile["login"]), reason=reason)
+        if not result.cancelled:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="job_not_running")
+        job = get_job_detail(config.db, job_id)
+        return {
+            "job": job,
+            "detail": "job_cancelled",
+            "signalled": result.signalled,
+            "signal_detail": result.detail,
+            "followup_url": result.followup_url,
+        }
+
     @app.get("/api/jobs/{job_id}/session")
     def api_job_session(job_id: int, _: str = Depends(current_user)) -> dict[str, Any]:
         session = job_session(config.db, job_id)
@@ -720,7 +822,11 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         if job_session(config.db, job_id) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
 
-        return StreamingResponse(_session_stream_events(config.db, job_id, after_id=after_id), media_type="text/event-stream", headers=_sse_headers())
+        return StreamingResponse(
+            _session_stream_events(config.db, job_id, after_id=after_id, shutdown_event=app.state.dashboard_shutdown_event),
+            media_type="text/event-stream",
+            headers=_sse_headers(),
+        )
 
     @app.get("/api/metrics/summary")
     def api_metrics(timezone: str = "UTC", _: str = Depends(current_user)) -> dict[str, Any]:
@@ -766,7 +872,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     def api_systemd_journal_stream(unit: str, _: str = Depends(current_user)) -> StreamingResponse:
         if unit not in allowed_unit_names():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="systemd_unit_not_allowed")
-        return StreamingResponse(_journal_stream_events(unit), media_type="text/event-stream", headers=_sse_headers())
+        return StreamingResponse(_journal_stream_events(unit, shutdown_event=app.state.dashboard_shutdown_event), media_type="text/event-stream", headers=_sse_headers())
 
     @app.get("/api/alerts")
     def api_alerts(include_resolved: bool = False, limit: int = 50, _: str = Depends(current_user)) -> dict[str, Any]:

@@ -82,6 +82,15 @@ def test_monitor_release_lookup_failure_is_not_alert(tmp_path, monkeypatch):
     assert report.metrics["latest_release_error"] == "could not fetch latest release for pilipilisbot/github-agent-bridge"
 
 
+def test_monitor_release_lookup_runtime_error_is_not_fatal(monkeypatch):
+    def fail_urlopen(*args, **kwargs):
+        raise RuntimeError("HTTP 503: Service Unavailable")
+
+    monkeypatch.setattr(monitor_module.urllib.request, "urlopen", fail_urlopen)
+
+    assert monitor_module._latest_github_release("pilipilisbot/github-agent-bridge") is None
+
+
 def test_monitor_alerts_on_blocked_job(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)

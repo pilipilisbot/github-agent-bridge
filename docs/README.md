@@ -12,6 +12,7 @@ A compact map of the `github-agent-bridge` documentation set.
 | Configure policy | [`policy-reference.md`](policy-reference.md) | Reference |
 | Roll out safely | [`shadow-canary.md`](shadow-canary.md) | How-to |
 | Operate production | [`operations.md`](operations.md) | How-to |
+| Publish the dashboard through nginx | [`nginx-dashboard.conf`](nginx-dashboard.conf) | Reference |
 | Configure dashboard GitHub OAuth | [`dashboard-github-oauth.md`](dashboard-github-oauth.md) | How-to |
 | Expose bridge knowledge to agents | [`mcp.md`](mcp.md) | How-to |
 | Develop the bridge | [`development.md`](development.md) | How-to |

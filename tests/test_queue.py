@@ -50,6 +50,30 @@ def test_connect_recreates_missing_parent_directory(tmp_path):
         ).fetchone()[0] == 1
 
 
+def test_queue_expands_user_in_db_path(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    JobQueue("~/state/q.sqlite3")
+
+    assert (home / "state" / "q.sqlite3").exists()
+    assert not (tmp_path / "~").exists()
+
+
+def test_connect_recreates_missing_parent_directory(tmp_path):
+    q = JobQueue(tmp_path / "missing" / "q.sqlite3")
+    for child in q.path.parent.iterdir():
+        child.unlink()
+    q.path.parent.rmdir()
+
+    assert q.claim_next("worker") is None
+    with sqlite3.connect(q.path) as con:
+        assert con.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='jobs'"
+        ).fetchone()[0] == 1
+
+
 def test_enqueue_and_coalesce_same_work_key(tmp_path, monkeypatch):
     monkeypatch.setattr("github_agent_bridge.actors.github_actor_details_for_context", lambda ctx, *, gh_bin="gh": None)
     q = JobQueue(tmp_path / "q.sqlite3")
@@ -235,6 +259,56 @@ def test_claim_can_filter_by_work_intent(tmp_path):
 
     assert claimed.id == review_job.id
     assert claimed.work_intent == "review_only"
+
+
+def test_cancel_running_records_actor_reason_and_finish_preserves_cancellation(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    claimed = q.claim_next("worker")
+    assert claimed is not None
+
+    requested = q.request_cancel_running(claimed.id, actor="ecarreras", reason="stale request")
+    assert requested is not None
+    assert requested.metadata["cancellation"]["state"] == "requested"
+
+    cancelled = q.mark_cancelled(claimed.id, actor="ecarreras", reason="stale request", signal_detail="sent SIGTERM", followup_url="https://github.com/gisce/erp/issues/1#issuecomment-2")
+    assert cancelled is not None
+    assert cancelled.status == "blocked"
+    assert cancelled.metadata["cancellation"]["state"] == "cancelled"
+    assert cancelled.metadata["cancellation"]["actor"] == "ecarreras"
+    assert "stale request" in (cancelled.last_error or "")
+
+    q.finish(claimed.id, "done", "late dispatch completion", "ok")
+    stored = q.get(claimed.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert "stale request" in (stored.last_error or "")
+
+
+def test_mark_cancelled_handles_finish_after_cancel_request(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    job, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    claimed = q.claim_next("worker")
+    assert claimed is not None
+
+    requested = q.request_cancel_running(claimed.id, actor="ecarreras", reason="stale request")
+    assert requested is not None
+
+    q.finish(claimed.id, "done", "late dispatch completion", "ok")
+
+    cancelled = q.mark_cancelled(
+        claimed.id,
+        actor="ecarreras",
+        reason="stale request",
+        signal_detail="runtime already exited",
+        followup_url="https://github.com/gisce/erp/issues/1#issuecomment-2",
+    )
+
+    assert cancelled is not None
+    assert cancelled.status == "blocked"
+    assert cancelled.metadata["cancellation"]["state"] == "cancelled"
+    assert cancelled.metadata["cancellation"]["signal_detail"] == "runtime already exited"
+    assert "followup_url=https://github.com/gisce/erp/issues/1#issuecomment-2" in (cancelled.last_error or "")
 
 
 def test_claim_fresh_review_retry_records_attempt_session_id(tmp_path):
