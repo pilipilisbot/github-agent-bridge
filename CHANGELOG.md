@@ -2,6 +2,40 @@
 
 <!-- version list -->
 
+## v0.58.3 (2026-08-04)
+
+### Bug Fixes
+
+- Cancel journal read before closing stream
+  ([`31f9761`](https://github.com/pilipilisbot/github-agent-bridge/commit/31f97611123b4ea05a0fc5d0d2c49c7583de4816))
+
+- Handle missing gh executable
+  ([`ecc87a0`](https://github.com/pilipilisbot/github-agent-bridge/commit/ecc87a0607f7e443d157fa847966f24cb570e885))
+
+- Harden sqlite queue path handling
+  ([#19](https://github.com/pilipilisbot/github-agent-bridge/pull/19),
+  [`d812ffc`](https://github.com/pilipilisbot/github-agent-bridge/commit/d812ffcabb3ef54b30b26b221fac2e3bd10fc48b))
+
+- Initialize sqlite after state directory recovery
+  ([#19](https://github.com/pilipilisbot/github-agent-bridge/pull/19),
+  [`d812ffc`](https://github.com/pilipilisbot/github-agent-bridge/commit/d812ffcabb3ef54b30b26b221fac2e3bd10fc48b))
+
+- Recover when sqlite parent directory disappears
+  ([#19](https://github.com/pilipilisbot/github-agent-bridge/pull/19),
+  [`d812ffc`](https://github.com/pilipilisbot/github-agent-bridge/commit/d812ffcabb3ef54b30b26b221fac2e3bd10fc48b))
+
+- Tolerate runtime errors in release check
+  ([`6573d20`](https://github.com/pilipilisbot/github-agent-bridge/commit/6573d20b18eb3d255a300cce70defcfc89faad5c))
+
+### Documentation
+
+- Add nginx dashboard restart page
+  ([`4e3e36e`](https://github.com/pilipilisbot/github-agent-bridge/commit/4e3e36e5fcc183cf972c33457c392bcde7ef5536))
+
+- Animate dashboard restart page
+  ([`9a37582`](https://github.com/pilipilisbot/github-agent-bridge/commit/9a37582acfe4a63bf0ad26e5f4a790bd61aec08b))
+
+
 ## v0.58.2 (2026-08-03)
 
 ### Bug Fixes
