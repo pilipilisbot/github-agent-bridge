@@ -39,6 +39,15 @@ class ImapReader:
         self.mark_seen = mark_seen
 
     def fetch_once(self) -> int:
+        for attempt in range(2):
+            try:
+                return self._fetch_once()
+            except imaplib.IMAP4.abort:
+                if attempt:
+                    raise
+        return 0
+
+    def _fetch_once(self) -> int:
         last_uid = int(self.queue.get_state("last_uid", "0") or 0)
         count = 0
         imap = imaplib.IMAP4_SSL(self.config.host, self.config.port)
