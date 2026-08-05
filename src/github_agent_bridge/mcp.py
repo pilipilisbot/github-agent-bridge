@@ -90,6 +90,21 @@ def create_token(db_path: str | Path, name: str, *, expires_at: str | None = Non
     }
 
 
+def update_token_owner(db_path: str | Path, token_id: str, user_login: str | None) -> dict[str, Any] | None:
+    owner = _clean_login(user_login, require_valid=True)
+    with _connect(db_path) as con:
+        cur = con.execute("UPDATE mcp_tokens SET user_login=? WHERE id=? AND revoked_at IS NULL", (owner, token_id))
+        if cur.rowcount == 0:
+            return None
+        row = con.execute(
+            """SELECT id, name, user_login, created_by, created_at, last_used_at, revoked_at, expires_at
+            FROM mcp_tokens
+            WHERE id=?""",
+            (token_id,),
+        ).fetchone()
+        return _token_dict(row) if row else None
+
+
 def list_tokens(db_path: str | Path, *, include_revoked: bool = False, user_login: str | None = None) -> list[dict[str, Any]]:
     clauses = []
     args: list[Any] = []

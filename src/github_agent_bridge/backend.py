@@ -49,7 +49,7 @@ from .dashboard_data import (
     transcript_entry_from_session_event,
 )
 from .monitor import monitor
-from .mcp import MCPServer, authenticate_token, create_token, list_tokens, revoke_token
+from .mcp import MCPServer, authenticate_token, create_token, list_tokens, revoke_token, update_token_owner
 from .observability import configure_sentry, list_alerts, recent_process_samples
 from .queue import JobQueue
 from .systemd_status import allowed_unit_names, stream_journal_lines, systemd_status
@@ -393,6 +393,25 @@ def _profile_from_login(login: str) -> dict[str, Any]:
         "html_url": f"https://github.com/{user}",
         "is_admin": False,
     }
+
+
+def _known_mcp_user_profiles(config: DashboardConfig, *, current_login: str = "") -> list[dict[str, Any]]:
+    logins = {login.lower() for login in config.allowed_users | config.admin_users if login}
+    if current_login:
+        logins.add(current_login.lower())
+    for token in list_tokens(config.db, include_revoked=True):
+        login = str(token.get("user_login") or "").strip().lower()
+        if login:
+            logins.add(login)
+    return sorted((_profile_from_login(login) for login in logins), key=lambda item: item["login"])
+
+
+def _require_known_mcp_owner(config: DashboardConfig, owner: str, *, current_login: str) -> str:
+    clean_owner = owner.strip().lower().lstrip("@")
+    known = {profile["login"] for profile in _known_mcp_user_profiles(config, current_login=current_login)}
+    if clean_owner not in known:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mcp_token_owner_unknown")
+    return clean_owner
 
 
 def _github_json(url: str, token: str) -> Any:
@@ -958,18 +977,38 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         owner = None if profile.get("is_admin") else str(profile.get("login") or "")
         return {"tokens": list_tokens(config.db, include_revoked=include_revoked, user_login=owner)}
 
+    @app.get("/api/mcp/users")
+    def api_mcp_users(profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        if not profile.get("is_admin"):
+            return {"users": [_profile_from_login(str(profile.get("login") or ""))]}
+        return {"users": _known_mcp_user_profiles(config, current_login=str(profile.get("login") or ""))}
+
     @app.post("/api/mcp/tokens")
     def api_mcp_token_create(payload: dict[str, Any], profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
         login = str(profile.get("login") or "")
         requested_owner = str(payload.get("user_login") or "").strip()
         if requested_owner and not profile.get("is_admin") and requested_owner.lower().lstrip("@") != login.lower():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_required")
-        owner = requested_owner or login
+        owner = _require_known_mcp_owner(config, requested_owner or login, current_login=login) if profile.get("is_admin") else requested_owner or login
         try:
             created = create_token(config.db, str(payload.get("name") or ""), expires_at=payload.get("expires_at"), user_login=owner, created_by=login)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return {"token": created["token"], "record": created["record"], "detail": "mcp_token_created"}
+
+    @app.patch("/api/mcp/tokens/{token_id}")
+    def api_mcp_token_update(token_id: str, payload: dict[str, Any], profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        if not profile.get("is_admin"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_required")
+        login = str(profile.get("login") or "")
+        owner = _require_known_mcp_owner(config, str(payload.get("user_login") or ""), current_login=login)
+        try:
+            record = update_token_owner(config.db, token_id, owner)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mcp_token_not_found")
+        return {"token": record, "detail": "mcp_token_updated"}
 
     @app.delete("/api/mcp/tokens/{token_id}")
     def api_mcp_token_revoke(token_id: str, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:

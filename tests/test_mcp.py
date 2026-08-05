@@ -4,7 +4,7 @@ import sqlite3
 
 from github_agent_bridge.cli import main
 from github_agent_bridge import feedback
-from github_agent_bridge.mcp import authenticate_token, create_token, list_tokens, revoke_token, serve_stdio
+from github_agent_bridge.mcp import authenticate_token, create_token, list_tokens, revoke_token, serve_stdio, update_token_owner
 from github_agent_bridge.queue import JobQueue
 
 
@@ -87,6 +87,23 @@ def test_mcp_token_revoke_can_be_scoped_to_owner(tmp_path):
     assert revoke_token(db, created["record"]["id"], user_login="bob") is False
     assert authenticate_token(db, created["token"]) is not None
     assert revoke_token(db, created["record"]["id"], user_login="alice") is True
+
+
+def test_mcp_token_owner_can_be_updated(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+
+    created = create_token(db, "legacy agent")
+    updated = update_token_owner(db, created["record"]["id"], "Alice")
+    listed = list_tokens(db, user_login="alice")
+    revoked = revoke_token(db, created["record"]["id"], user_login="alice")
+    missing_after_revoke = update_token_owner(db, created["record"]["id"], "bob")
+
+    assert updated is not None
+    assert updated["user_login"] == "alice"
+    assert listed[0]["id"] == created["record"]["id"]
+    assert revoked is True
+    assert missing_after_revoke is None
 
 
 def test_stdio_mcp_lists_applicable_knowledge(tmp_path):

@@ -168,6 +168,7 @@ describe("MCP access page", () => {
       detail: "mcp_token_created",
     });
     const onRevoke = vi.fn().mockResolvedValue(undefined);
+    const onUpdateOwner = vi.fn().mockResolvedValue(undefined);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(
@@ -187,10 +188,15 @@ describe("MCP access page", () => {
         loading={false}
         error={null}
         user={admin}
+        ownerOptions={[
+          { login: "admin", avatar_url: "", html_url: "https://github.com/admin", is_admin: true },
+          { login: "bob", avatar_url: "", html_url: "https://github.com/bob", is_admin: false },
+        ]}
         dashboardUrl="https://bridge.example.com/ops"
         dashboardUrlSource="configured"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={onCreate}
+        onUpdateOwner={onUpdateOwner}
         onRevoke={onRevoke}
         onRefresh={vi.fn()}
       />,
@@ -209,12 +215,14 @@ describe("MCP access page", () => {
     expect(screen.queryByText(/mcp-serve/)).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Token name"), "local agent");
-    await user.type(screen.getByLabelText("Owner"), "bob");
+    await user.selectOptions(screen.getByLabelText("Owner"), "bob");
     await user.click(screen.getByRole("button", { name: "Create token" }));
 
     expect(onCreate).toHaveBeenCalledWith("local agent", "bob");
-    expect(screen.getByText("@bob")).toBeInTheDocument();
+    expect(screen.getAllByText("@bob").length).toBeGreaterThan(0);
     expect(await screen.findByText("gab_mcp_secret")).toBeInTheDocument();
+    await user.selectOptions(screen.getAllByLabelText("Owner for local agent")[0], "admin");
+    expect(onUpdateOwner).toHaveBeenCalledWith("token-1", "admin");
 
     await user.click(screen.getAllByRole("button", { name: "Revoke" })[0]);
 
@@ -256,10 +264,12 @@ describe("MCP access page", () => {
         loading={false}
         error={null}
         user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
+        ownerOptions={[{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }]}
         dashboardUrl="https://bridge.example.com"
         dashboardUrlSource="configured"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={onCreate}
+        onUpdateOwner={vi.fn()}
         onRevoke={vi.fn()}
         onRefresh={vi.fn()}
       />,
@@ -282,10 +292,12 @@ describe("MCP access page", () => {
         loading={false}
         error={null}
         user={admin}
+        ownerOptions={[admin]}
         dashboardUrl="http://127.0.0.1:8765"
         dashboardUrlSource="request"
         now={Date.parse("2026-06-23T11:05:00Z")}
         onCreate={vi.fn()}
+        onUpdateOwner={vi.fn()}
         onRevoke={vi.fn()}
         onRefresh={vi.fn()}
       />,

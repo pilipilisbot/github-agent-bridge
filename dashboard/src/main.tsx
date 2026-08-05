@@ -416,6 +416,10 @@ type McpTokenCreateResponse = {
   detail: string;
 };
 
+type McpUsersResponse = {
+  users: UserProfile[];
+};
+
 type WebPushSubscriptionStatus = {
   enabled: boolean;
   subscriptions: Array<{
@@ -840,6 +844,11 @@ function App() {
     queryFn: () => api<{ tokens: McpTokenRecord[] }>("/api/mcp/tokens"),
     enabled: isMcpRoute && Boolean(me.data?.user),
   });
+  const mcpUsers = useQuery({
+    queryKey: ["mcp-users"],
+    queryFn: () => api<McpUsersResponse>("/api/mcp/users"),
+    enabled: isMcpRoute && Boolean(me.data?.user),
+  });
   const detail = useQuery({
     queryKey: ["job", selectedJobId],
     queryFn: () => api<{ job: Job }>(`/api/jobs/${selectedJobId}`),
@@ -905,6 +914,15 @@ function App() {
     });
     queryClient.invalidateQueries({ queryKey: ["mcp-tokens"] });
     return created;
+  }, [queryClient]);
+  const updateMcpTokenOwner = React.useCallback(async (tokenId: string, userLogin: string) => {
+    await api<{ token: McpTokenRecord }>(`/api/mcp/tokens/${encodeURIComponent(tokenId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_login: userLogin }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["mcp-tokens"] });
+    queryClient.invalidateQueries({ queryKey: ["mcp-users"] });
   }, [queryClient]);
   const revokeMcpToken = React.useCallback(async (tokenId: string) => {
     await api<{ detail: string }>(`/api/mcp/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" });
@@ -1113,10 +1131,12 @@ function App() {
             loading={mcpTokens.isLoading}
             error={mcpTokens.error}
             user={me.data?.user}
+            ownerOptions={mcpUsers.data?.users ?? []}
             dashboardUrl={dashboardStatus.data?.dashboard_url}
             dashboardUrlSource={dashboardStatus.data?.dashboard_url_source}
             now={now}
             onCreate={createMcpToken}
+            onUpdateOwner={updateMcpTokenOwner}
             onRevoke={revokeMcpToken}
             onRefresh={() => mcpTokens.refetch()}
           />
@@ -2036,10 +2056,12 @@ function McpPage({
   loading,
   error,
   user,
+  ownerOptions,
   dashboardUrl,
   dashboardUrlSource,
   now,
   onCreate,
+  onUpdateOwner,
   onRevoke,
   onRefresh,
 }: {
@@ -2047,10 +2069,12 @@ function McpPage({
   loading: boolean;
   error: Error | null;
   user: UserProfile | undefined;
+  ownerOptions: UserProfile[];
   dashboardUrl?: string;
   dashboardUrlSource?: "configured" | "forwarded" | "request";
   now: number;
   onCreate: (name: string, userLogin?: string) => Promise<McpTokenCreateResponse>;
+  onUpdateOwner: (tokenId: string, userLogin: string) => Promise<void>;
   onRevoke: (tokenId: string) => Promise<void>;
   onRefresh: () => void;
 }) {
@@ -2058,9 +2082,16 @@ function McpPage({
   const [userLogin, setUserLogin] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
+  const [updatingOwnerId, setUpdatingOwnerId] = React.useState<string | null>(null);
   const [createdToken, setCreatedToken] = React.useState<McpTokenCreateResponse | null>(null);
   const [actionError, setActionError] = React.useState("");
   const activeTokens = tokens ?? [];
+  const selectedOwner = ownerOptions.find((option) => option.login === userLogin);
+  React.useEffect(() => {
+    if (!user?.is_admin) return;
+    if (userLogin && ownerOptions.some((option) => option.login === userLogin)) return;
+    setUserLogin(user?.login || ownerOptions[0]?.login || "");
+  }, [ownerOptions, user?.is_admin, user?.login, userLogin]);
   const publicBaseUrl = (dashboardUrl || (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/$/, "");
   const mcpDashboardUrl = `${publicBaseUrl}/mcp`;
   const mcpEndpointUrl = `${publicBaseUrl}/api/mcp`;
@@ -2095,10 +2126,9 @@ function McpPage({
             setCreating(true);
             setActionError("");
             try {
-              const created = await onCreate(cleanName, user?.is_admin ? userLogin.trim() : undefined);
+              const created = await onCreate(cleanName, user?.is_admin ? userLogin : undefined);
               setCreatedToken(created);
               setName("");
-              if (!user?.is_admin) setUserLogin("");
             } catch (err) {
               setActionError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -2111,17 +2141,35 @@ function McpPage({
           </Field>
           {user?.is_admin ? (
             <Field label="Owner">
-              <input className="control" value={userLogin} placeholder={user?.login || "github-login"} disabled={creating} onChange={(event) => setUserLogin(event.target.value)} />
+              <select className="control" aria-label="Owner" value={userLogin} disabled={creating || ownerOptions.length === 0} onChange={(event) => setUserLogin(event.target.value)}>
+                {ownerOptions.length === 0 ? <option value="">No known users</option> : null}
+                {ownerOptions.map((option) => (
+                  <option key={option.login} value={option.login}>
+                    @{option.login}{option.login === user?.login ? " (you)" : ""}
+                  </option>
+                ))}
+              </select>
+              {selectedOwner ? <span className="font-normal text-muted">Token will be linked to @{selectedOwner.login}.</span> : null}
             </Field>
           ) : null}
-          <button className="inline-flex h-9 items-center justify-center gap-2 self-end rounded-md bg-primary px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={creating || !name.trim()}>
+          <button className="inline-flex h-9 items-center justify-center gap-2 self-end rounded-md bg-primary px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={creating || !name.trim() || Boolean(user?.is_admin && !userLogin)}>
             <KeyRound className="h-4 w-4" aria-hidden />
             {creating ? "Creating..." : "Create token"}
           </button>
         </form>
       </Panel>
       <Panel title="Active tokens">
-        <McpTokenList tokens={activeTokens} loading={loading} now={now} revokingId={revokingId} onRevoke={async (tokenId) => {
+        <McpTokenList tokens={activeTokens} loading={loading} now={now} ownerOptions={ownerOptions} canManageOwners={Boolean(user?.is_admin)} revokingId={revokingId} updatingOwnerId={updatingOwnerId} onUpdateOwner={async (tokenId, owner) => {
+          setUpdatingOwnerId(tokenId);
+          setActionError("");
+          try {
+            await onUpdateOwner(tokenId, owner);
+          } catch (err) {
+            setActionError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setUpdatingOwnerId(null);
+          }
+        }} onRevoke={async (tokenId) => {
           if (!window.confirm("Revoke this MCP token?")) return;
           setRevokingId(tokenId);
           setActionError("");
@@ -2217,7 +2265,27 @@ function PageTitle({ icon, title, subtitle, action }: { icon: React.ReactNode; t
   );
 }
 
-function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: McpTokenRecord[]; loading: boolean; now: number; revokingId: string | null; onRevoke: (tokenId: string) => Promise<void> }) {
+function McpTokenList({
+  tokens,
+  loading,
+  now,
+  ownerOptions,
+  canManageOwners,
+  revokingId,
+  updatingOwnerId,
+  onUpdateOwner,
+  onRevoke,
+}: {
+  tokens: McpTokenRecord[];
+  loading: boolean;
+  now: number;
+  ownerOptions: UserProfile[];
+  canManageOwners: boolean;
+  revokingId: string | null;
+  updatingOwnerId: string | null;
+  onUpdateOwner: (tokenId: string, userLogin: string) => Promise<void>;
+  onRevoke: (tokenId: string) => Promise<void>;
+}) {
   if (loading && tokens.length === 0) return <EmptyState text="Loading MCP tokens..." />;
   if (tokens.length === 0) return <EmptyState text="No active MCP tokens." />;
   return (
@@ -2228,7 +2296,7 @@ function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: 
             <div className="min-w-0">
               <h3 className="break-words text-sm font-semibold [overflow-wrap:anywhere]">{token.name}</h3>
               <div className="mt-1 break-all font-mono text-xs text-muted">{token.id}</div>
-              {token.user_login ? <div className="mt-1 text-xs text-muted">Owner: @{token.user_login}</div> : null}
+              {canManageOwners ? <McpOwnerSelect token={token} ownerOptions={ownerOptions} disabled={updatingOwnerId === token.id} onUpdateOwner={onUpdateOwner} /> : token.user_login ? <div className="mt-1 text-xs text-muted">Owner: @{token.user_login}</div> : null}
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <MiniStat label="Created" value={<TimeText value={token.created_at} relative now={now} />} />
@@ -2257,7 +2325,9 @@ function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: 
             {tokens.map((token) => (
               <tr key={token.id} className="border-b border-border last:border-b-0">
                 <td className="px-3 py-3 font-semibold">{token.name}</td>
-                <td className="px-3 py-3 text-xs text-muted">{token.user_login ? `@${token.user_login}` : "unassigned"}</td>
+                <td className="px-3 py-3 text-xs text-muted">
+                  {canManageOwners ? <McpOwnerSelect token={token} ownerOptions={ownerOptions} disabled={updatingOwnerId === token.id} onUpdateOwner={onUpdateOwner} /> : token.user_login ? `@${token.user_login}` : "unassigned"}
+                </td>
                 <td className="px-3 py-3 font-mono text-xs"><TimeText value={token.created_at} relative now={now} /></td>
                 <td className="px-3 py-3 font-mono text-xs">{token.last_used_at ? <TimeText value={token.last_used_at} relative now={now} /> : "never"}</td>
                 <td className="px-3 py-3 font-mono text-xs text-muted">{token.id}</td>
@@ -2273,6 +2343,29 @@ function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: 
         </table>
       </div>
     </>
+  );
+}
+
+function McpOwnerSelect({ token, ownerOptions, disabled, onUpdateOwner }: { token: McpTokenRecord; ownerOptions: UserProfile[]; disabled: boolean; onUpdateOwner: (tokenId: string, userLogin: string) => Promise<void> }) {
+  const value = token.user_login ?? "";
+  return (
+    <select
+      className="control h-8 min-w-[10rem] text-xs"
+      aria-label={`Owner for ${token.name}`}
+      value={value}
+      disabled={disabled || ownerOptions.length === 0}
+      onChange={(event) => {
+        if (!event.target.value || event.target.value === token.user_login) return;
+        void onUpdateOwner(token.id, event.target.value);
+      }}
+    >
+      {!value ? <option value="">Select owner</option> : null}
+      {ownerOptions.map((option) => (
+        <option key={option.login} value={option.login}>
+          @{option.login}
+        </option>
+      ))}
+    </select>
   );
 }
 
