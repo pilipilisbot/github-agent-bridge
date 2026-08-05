@@ -148,7 +148,6 @@ CREATE TABLE IF NOT EXISTS mcp_tokens (
   expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tokens_active ON mcp_tokens(revoked_at, expires_at, created_at);
-CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user ON mcp_tokens(user_login, revoked_at, created_at);
 CREATE TABLE IF NOT EXISTS web_push_subscriptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_login TEXT NOT NULL,
