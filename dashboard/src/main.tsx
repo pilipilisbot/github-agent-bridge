@@ -402,6 +402,8 @@ type KnowledgeTab = "proposals" | "rules" | "events";
 type McpTokenRecord = {
   id: string;
   name: string;
+  user_login: string | null;
+  created_by: string | null;
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
@@ -836,7 +838,7 @@ function App() {
   const mcpTokens = useQuery({
     queryKey: ["mcp-tokens"],
     queryFn: () => api<{ tokens: McpTokenRecord[] }>("/api/mcp/tokens"),
-    enabled: isMcpRoute && Boolean(me.data?.user?.is_admin),
+    enabled: isMcpRoute && Boolean(me.data?.user),
   });
   const detail = useQuery({
     queryKey: ["job", selectedJobId],
@@ -895,11 +897,11 @@ function App() {
     });
     queryClient.invalidateQueries({ queryKey: ["knowledge"] });
   }, [queryClient]);
-  const createMcpToken = React.useCallback(async (name: string) => {
+  const createMcpToken = React.useCallback(async (name: string, userLogin?: string) => {
     const created = await api<McpTokenCreateResponse>("/api/mcp/tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, user_login: userLogin || undefined }),
     });
     queryClient.invalidateQueries({ queryKey: ["mcp-tokens"] });
     return created;
@@ -2048,11 +2050,12 @@ function McpPage({
   dashboardUrl?: string;
   dashboardUrlSource?: "configured" | "forwarded" | "request";
   now: number;
-  onCreate: (name: string) => Promise<McpTokenCreateResponse>;
+  onCreate: (name: string, userLogin?: string) => Promise<McpTokenCreateResponse>;
   onRevoke: (tokenId: string) => Promise<void>;
   onRefresh: () => void;
 }) {
   const [name, setName] = React.useState("");
+  const [userLogin, setUserLogin] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [createdToken, setCreatedToken] = React.useState<McpTokenCreateResponse | null>(null);
@@ -2061,17 +2064,9 @@ function McpPage({
   const publicBaseUrl = (dashboardUrl || (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/$/, "");
   const mcpDashboardUrl = `${publicBaseUrl}/mcp`;
   const mcpEndpointUrl = `${publicBaseUrl}/api/mcp`;
-  if (user && !user.is_admin) {
-    return (
-      <div className="grid min-w-0 gap-4">
-        <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Read-only agent access is limited to dashboard admins." action={<RefreshButton onClick={onRefresh} />} />
-        <EmptyState text="Admin access is required to manage MCP tokens." />
-      </div>
-    );
-  }
   return (
     <div className="grid min-w-0 gap-4">
-      <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle="Issue and revoke read-only tokens for agents." action={<RefreshButton onClick={onRefresh} />} />
+      <PageTitle icon={<KeyRound className="h-5 w-5 text-muted" aria-hidden />} title="MCP access" subtitle={user?.is_admin ? "Issue and revoke read-only tokens for any dashboard user." : "Issue and revoke read-only tokens linked to your user."} action={<RefreshButton onClick={onRefresh} />} />
       {error ? <Banner tone="error" text={error.message} /> : null}
       {actionError ? <Banner tone="error" text={actionError} /> : null}
       <McpSetupGuide dashboardUrl={mcpDashboardUrl} endpointUrl={mcpEndpointUrl} dashboardUrlSource={dashboardUrlSource ?? "request"} />
@@ -2092,7 +2087,7 @@ function McpPage({
       ) : null}
       <Panel title="Create token">
         <form
-          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"
+          className={user?.is_admin ? "grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(12rem,16rem)_auto]" : "grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"}
           onSubmit={async (event) => {
             event.preventDefault();
             const cleanName = name.trim();
@@ -2100,9 +2095,10 @@ function McpPage({
             setCreating(true);
             setActionError("");
             try {
-              const created = await onCreate(cleanName);
+              const created = await onCreate(cleanName, user?.is_admin ? userLogin.trim() : undefined);
               setCreatedToken(created);
               setName("");
+              if (!user?.is_admin) setUserLogin("");
             } catch (err) {
               setActionError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -2113,6 +2109,11 @@ function McpPage({
           <Field label="Token name">
             <input className="control" value={name} placeholder="local agent" disabled={creating} onChange={(event) => setName(event.target.value)} />
           </Field>
+          {user?.is_admin ? (
+            <Field label="Owner">
+              <input className="control" value={userLogin} placeholder={user?.login || "github-login"} disabled={creating} onChange={(event) => setUserLogin(event.target.value)} />
+            </Field>
+          ) : null}
           <button className="inline-flex h-9 items-center justify-center gap-2 self-end rounded-md bg-primary px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={creating || !name.trim()}>
             <KeyRound className="h-4 w-4" aria-hidden />
             {creating ? "Creating..." : "Create token"}
@@ -2227,6 +2228,7 @@ function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: 
             <div className="min-w-0">
               <h3 className="break-words text-sm font-semibold [overflow-wrap:anywhere]">{token.name}</h3>
               <div className="mt-1 break-all font-mono text-xs text-muted">{token.id}</div>
+              {token.user_login ? <div className="mt-1 text-xs text-muted">Owner: @{token.user_login}</div> : null}
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <MiniStat label="Created" value={<TimeText value={token.created_at} relative now={now} />} />
@@ -2244,6 +2246,7 @@ function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: 
           <thead>
             <tr className="border-b border-border bg-slate-50 text-left text-xs text-muted">
               <th className="px-3 py-2 font-semibold">Name</th>
+              <th className="px-3 py-2 font-semibold">Owner</th>
               <th className="px-3 py-2 font-semibold">Created</th>
               <th className="px-3 py-2 font-semibold">Last used</th>
               <th className="px-3 py-2 font-semibold">ID</th>
@@ -2254,6 +2257,7 @@ function McpTokenList({ tokens, loading, now, revokingId, onRevoke }: { tokens: 
             {tokens.map((token) => (
               <tr key={token.id} className="border-b border-border last:border-b-0">
                 <td className="px-3 py-3 font-semibold">{token.name}</td>
+                <td className="px-3 py-3 text-xs text-muted">{token.user_login ? `@${token.user_login}` : "unassigned"}</td>
                 <td className="px-3 py-3 font-mono text-xs"><TimeText value={token.created_at} relative now={now} /></td>
                 <td className="px-3 py-3 font-mono text-xs">{token.last_used_at ? <TimeText value={token.last_used_at} relative now={now} /> : "never"}</td>
                 <td className="px-3 py-3 font-mono text-xs text-muted">{token.id}</td>

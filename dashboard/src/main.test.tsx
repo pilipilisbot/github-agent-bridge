@@ -158,6 +158,8 @@ describe("MCP access page", () => {
       record: {
         id: "token-1",
         name: "local agent",
+        user_login: "bob",
+        created_by: "admin",
         created_at: "2026-06-23T11:00:00Z",
         last_used_at: null,
         revoked_at: null,
@@ -174,6 +176,8 @@ describe("MCP access page", () => {
           {
             id: "token-1",
             name: "local agent",
+            user_login: "bob",
+            created_by: "admin",
             created_at: "2026-06-23T11:00:00Z",
             last_used_at: null,
             revoked_at: null,
@@ -205,9 +209,11 @@ describe("MCP access page", () => {
     expect(screen.queryByText(/mcp-serve/)).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Token name"), "local agent");
+    await user.type(screen.getByLabelText("Owner"), "bob");
     await user.click(screen.getByRole("button", { name: "Create token" }));
 
-    expect(onCreate).toHaveBeenCalledWith("local agent");
+    expect(onCreate).toHaveBeenCalledWith("local agent", "bob");
+    expect(screen.getByText("@bob")).toBeInTheDocument();
     expect(await screen.findByText("gab_mcp_secret")).toBeInTheDocument();
 
     await user.click(screen.getAllByRole("button", { name: "Revoke" })[0]);
@@ -217,24 +223,56 @@ describe("MCP access page", () => {
     confirm.mockRestore();
   });
 
-  it("keeps MCP token management admin-only", () => {
+  it("lets non-admin users manage their own MCP tokens", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue({
+      token: "gab_mcp_reader_secret",
+      record: {
+        id: "token-2",
+        name: "reader agent",
+        user_login: "reader",
+        created_by: "reader",
+        created_at: "2026-06-23T11:00:00Z",
+        last_used_at: null,
+        revoked_at: null,
+        expires_at: null,
+      },
+      detail: "mcp_token_created",
+    });
     render(
       <McpPage
-        tokens={[]}
+        tokens={[
+          {
+            id: "token-2",
+            name: "reader agent",
+            user_login: "reader",
+            created_by: "reader",
+            created_at: "2026-06-23T11:00:00Z",
+            last_used_at: null,
+            revoked_at: null,
+            expires_at: null,
+          },
+        ]}
         loading={false}
         error={null}
         user={{ login: "reader", avatar_url: "", html_url: "https://github.com/reader", is_admin: false }}
         dashboardUrl="https://bridge.example.com"
         dashboardUrlSource="configured"
         now={Date.parse("2026-06-23T11:05:00Z")}
-        onCreate={vi.fn()}
+        onCreate={onCreate}
         onRevoke={vi.fn()}
         onRefresh={vi.fn()}
       />,
     );
 
-    expect(screen.getByText("Admin access is required to manage MCP tokens.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create token" })).not.toBeInTheDocument();
+    expect(screen.getByText("Issue and revoke read-only tokens linked to your user.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Owner")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Token name"), "reader agent");
+    await user.click(screen.getByRole("button", { name: "Create token" }));
+
+    expect(onCreate).toHaveBeenCalledWith("reader agent", undefined);
+    expect(await screen.findByText("gab_mcp_reader_secret")).toBeInTheDocument();
   });
 
   it("requires a configured public URL before showing a remote MCP endpoint", () => {

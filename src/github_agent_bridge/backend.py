@@ -954,20 +954,27 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         return {"rule": {**rule, "can_manage": True}, "detail": "knowledge_rule_updated"}
 
     @app.get("/api/mcp/tokens")
-    def api_mcp_tokens(_: dict[str, Any] = Depends(current_admin_profile), include_revoked: bool = False) -> dict[str, Any]:
-        return {"tokens": list_tokens(config.db, include_revoked=include_revoked)}
+    def api_mcp_tokens(profile: dict[str, Any] = Depends(current_profile), include_revoked: bool = False) -> dict[str, Any]:
+        owner = None if profile.get("is_admin") else str(profile.get("login") or "")
+        return {"tokens": list_tokens(config.db, include_revoked=include_revoked, user_login=owner)}
 
     @app.post("/api/mcp/tokens")
-    def api_mcp_token_create(payload: dict[str, Any], _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
+    def api_mcp_token_create(payload: dict[str, Any], profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        login = str(profile.get("login") or "")
+        requested_owner = str(payload.get("user_login") or "").strip()
+        if requested_owner and not profile.get("is_admin") and requested_owner.lower().lstrip("@") != login.lower():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_required")
+        owner = requested_owner or login
         try:
-            created = create_token(config.db, str(payload.get("name") or ""), expires_at=payload.get("expires_at"))
+            created = create_token(config.db, str(payload.get("name") or ""), expires_at=payload.get("expires_at"), user_login=owner, created_by=login)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return {"token": created["token"], "record": created["record"], "detail": "mcp_token_created"}
 
     @app.delete("/api/mcp/tokens/{token_id}")
-    def api_mcp_token_revoke(token_id: str, _: dict[str, Any] = Depends(current_admin_profile)) -> dict[str, Any]:
-        if not revoke_token(config.db, token_id):
+    def api_mcp_token_revoke(token_id: str, profile: dict[str, Any] = Depends(current_profile)) -> dict[str, Any]:
+        owner = None if profile.get("is_admin") else str(profile.get("login") or "")
+        if not revoke_token(config.db, token_id, user_login=owner):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mcp_token_not_found")
         return {"detail": "mcp_token_revoked"}
 

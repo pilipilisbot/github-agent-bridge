@@ -140,12 +140,15 @@ CREATE TABLE IF NOT EXISTS mcp_tokens (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
+  user_login TEXT,
+  created_by TEXT,
   created_at TEXT NOT NULL,
   last_used_at TEXT,
   revoked_at TEXT,
   expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tokens_active ON mcp_tokens(revoked_at, expires_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user ON mcp_tokens(user_login, revoked_at, created_at);
 CREATE TABLE IF NOT EXISTS web_push_subscriptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_login TEXT NOT NULL,

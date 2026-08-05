@@ -608,8 +608,11 @@ class JobQueue:
         tables = {
             "jobs": {"trigger_actor": "TEXT", "trigger_actor_avatar_url": "TEXT"},
             "coalesced_notifications": {"trigger_actor": "TEXT", "trigger_actor_avatar_url": "TEXT"},
+            "mcp_tokens": {"user_login": "TEXT", "created_by": "TEXT"},
         }
         for table, columns in tables.items():
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is None:
+                continue
             existing = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
             for column, definition in columns.items():
                 if column not in existing:
