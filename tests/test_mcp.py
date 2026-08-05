@@ -1,5 +1,6 @@
 import io
 import json
+import sqlite3
 
 from github_agent_bridge.cli import main
 from github_agent_bridge import feedback
@@ -32,17 +33,60 @@ def test_mcp_tokens_are_hashed_authenticated_and_revocable(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     JobQueue(db)
 
-    created = create_token(db, "local agent")
+    created = create_token(db, "local agent", user_login="Alice", created_by="Admin")
     token = created["token"]
     records = list_tokens(db)
 
     assert token.startswith("gab_mcp_")
     assert records == [created["record"]]
+    assert records[0]["user_login"] == "alice"
+    assert records[0]["created_by"] == "admin"
+    assert list_tokens(db, user_login="bob") == []
+    assert list_tokens(db, user_login="alice") == [created["record"]]
     assert authenticate_token(db, token)["id"] == created["record"]["id"]
     assert revoke_token(db, created["record"]["id"]) is True
     assert authenticate_token(db, token) is None
     assert list_tokens(db) == []
     assert list_tokens(db, include_revoked=True)[0]["revoked_at"]
+
+
+def test_existing_mcp_tokens_table_is_upgraded_before_user_index(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE mcp_tokens (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          last_used_at TEXT,
+          revoked_at TEXT,
+          expires_at TEXT
+        );
+        """
+    )
+    con.close()
+
+    JobQueue(db)
+
+    con = sqlite3.connect(db)
+    columns = {row[1] for row in con.execute("PRAGMA table_info(mcp_tokens)")}
+    indexes = {row[1] for row in con.execute("PRAGMA index_list(mcp_tokens)")}
+    con.close()
+    assert {"user_login", "created_by"}.issubset(columns)
+    assert "idx_mcp_tokens_user" in indexes
+
+
+def test_mcp_token_revoke_can_be_scoped_to_owner(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+
+    created = create_token(db, "alice agent", user_login="alice")
+
+    assert revoke_token(db, created["record"]["id"], user_login="bob") is False
+    assert authenticate_token(db, created["token"]) is not None
+    assert revoke_token(db, created["record"]["id"], user_login="alice") is True
 
 
 def test_stdio_mcp_lists_applicable_knowledge(tmp_path):

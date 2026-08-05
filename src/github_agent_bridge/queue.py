@@ -40,12 +40,14 @@ class JobQueue:
         if initialize:
             con.executescript(SCHEMA)
             self._ensure_columns(con)
+            self._ensure_indexes(con)
         return con
 
     def init(self) -> None:
         with self.connect() as con:
             con.executescript(SCHEMA)
             self._ensure_columns(con)
+            self._ensure_indexes(con)
 
     def enqueue(self, n: Notification, policy: Policy) -> tuple[Job | None, str]:
         ctx = extract_github_context(n.body)
@@ -608,12 +610,22 @@ class JobQueue:
         tables = {
             "jobs": {"trigger_actor": "TEXT", "trigger_actor_avatar_url": "TEXT"},
             "coalesced_notifications": {"trigger_actor": "TEXT", "trigger_actor_avatar_url": "TEXT"},
+            "mcp_tokens": {"user_login": "TEXT", "created_by": "TEXT"},
         }
         for table, columns in tables.items():
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is None:
+                continue
             existing = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
             for column, definition in columns.items():
                 if column not in existing:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _ensure_indexes(self, con: sqlite3.Connection) -> None:
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_tokens'").fetchone() is None:
+            return
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user ON mcp_tokens(user_login, revoked_at, created_at)"
+        )
 
     def _row_to_job(self, row: sqlite3.Row | None) -> Job | None:
         if row is None:

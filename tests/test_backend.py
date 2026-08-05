@@ -1221,20 +1221,43 @@ def test_dashboard_admin_manages_mcp_tokens(tmp_path):
     client = TestClient(app)
     client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
 
-    forbidden = client.post("/api/mcp/tokens", json={"name": "local agent"})
+    reader_created = client.post("/api/mcp/tokens", json={"name": "reader agent"})
     client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"}, is_admin=True)))
-    created = client.post("/api/mcp/tokens", json={"name": "local agent"})
+    created = client.post("/api/mcp/tokens", json={"name": "local agent", "user_login": "bob"})
     listed = client.get("/api/mcp/tokens")
     revoked = client.delete(f"/api/mcp/tokens/{created.json()['record']['id']}")
     listed_after_revoke = client.get("/api/mcp/tokens")
 
-    assert forbidden.status_code == 403
+    assert reader_created.status_code == 200
+    assert reader_created.json()["record"]["user_login"] == "alice"
     assert created.status_code == 200
     assert created.json()["token"].startswith("gab_mcp_")
-    assert listed.json()["tokens"][0]["name"] == "local agent"
+    assert created.json()["record"]["user_login"] == "bob"
+    assert created.json()["record"]["created_by"] == "alice"
+    assert {token["name"] for token in listed.json()["tokens"]} == {"reader agent", "local agent"}
     assert "token" not in listed.json()["tokens"][0]
     assert revoked.status_code == 200
-    assert listed_after_revoke.json()["tokens"] == []
+    assert [token["name"] for token in listed_after_revoke.json()["tokens"]] == ["reader agent"]
+
+
+def test_dashboard_user_manages_only_own_mcp_tokens(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    JobQueue(db)
+    alice = create_token(db, "alice agent", user_login="alice")
+    bob = create_token(db, "bob agent", user_login="bob")
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice", "bob"}, admin_users={"admin"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
+
+    listed = client.get("/api/mcp/tokens")
+    forbidden_create = client.post("/api/mcp/tokens", json={"name": "not mine", "user_login": "bob"})
+    forbidden_revoke = client.delete(f"/api/mcp/tokens/{bob['record']['id']}")
+    revoked = client.delete(f"/api/mcp/tokens/{alice['record']['id']}")
+
+    assert [token["name"] for token in listed.json()["tokens"]] == ["alice agent"]
+    assert forbidden_create.status_code == 403
+    assert forbidden_revoke.status_code == 404
+    assert revoked.status_code == 200
 
 
 def test_http_mcp_uses_bearer_tokens_and_shared_server(tmp_path):

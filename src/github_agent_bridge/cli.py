@@ -410,14 +410,14 @@ def cmd_feedback_proposals(args: argparse.Namespace) -> int:
 
 def cmd_mcp_token_create(args: argparse.Namespace) -> int:
     JobQueue(args.db)
-    payload = create_token(args.db, args.name, expires_at=args.expires_at)
+    payload = create_token(args.db, args.name, expires_at=args.expires_at, user_login=args.user, created_by=args.created_by)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_mcp_tokens(args: argparse.Namespace) -> int:
     JobQueue(args.db)
-    print(json.dumps({"tokens": list_tokens(args.db, include_revoked=args.include_revoked)}, ensure_ascii=False, indent=2))
+    print(json.dumps({"tokens": list_tokens(args.db, include_revoked=args.include_revoked, user_login=args.user)}, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -575,10 +575,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_feedback_proposals)
     s = sub.add_parser("mcp-token-create", help="create an MCP access token")
     s.add_argument("--name", required=True, help="human-readable token name")
+    s.add_argument("--user", default=None, help="GitHub login that owns the token")
+    s.add_argument("--created-by", default=None, help="GitHub login that issued the token")
     s.add_argument("--expires-at", default=None, help="optional UTC ISO timestamp after which the token is rejected")
     s.set_defaults(func=cmd_mcp_token_create)
     s = sub.add_parser("mcp-tokens", help="list MCP access token records without token secrets")
     s.add_argument("--include-revoked", action="store_true")
+    s.add_argument("--user", default=None, help="filter tokens by owning GitHub login")
     s.set_defaults(func=cmd_mcp_tokens)
     s = sub.add_parser("mcp-token-revoke", help="revoke an MCP access token")
     s.add_argument("token_id")

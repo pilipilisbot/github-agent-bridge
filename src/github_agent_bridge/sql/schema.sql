@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS mcp_tokens (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
+  user_login TEXT,
+  created_by TEXT,
   created_at TEXT NOT NULL,
   last_used_at TEXT,
   revoked_at TEXT,

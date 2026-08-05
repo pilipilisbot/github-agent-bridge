@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from .actors import normalize_github_login
 from .feedback import list_applicable_rules, list_repositories
 from .models import utc_now
 
@@ -19,7 +20,19 @@ TOKEN_PREFIX = "gab_mcp_"
 def _connect(db_path: str | Path) -> sqlite3.Connection:
     con = sqlite3.connect(db_path, timeout=30, isolation_level=None)
     con.row_factory = sqlite3.Row
+    _ensure_schema(con)
     return con
+
+
+def _ensure_schema(con: sqlite3.Connection) -> None:
+    exists = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_tokens'").fetchone()
+    if exists is None:
+        return
+    existing = {row["name"] for row in con.execute("PRAGMA table_info(mcp_tokens)")}
+    columns = {"user_login": "TEXT", "created_by": "TEXT"}
+    for column, definition in columns.items():
+        if column not in existing:
+            con.execute(f"ALTER TABLE mcp_tokens ADD COLUMN {column} {definition}")
 
 
 def _hash_token(token: str) -> str:
@@ -30,6 +43,8 @@ def _token_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row["name"],
+        "user_login": row["user_login"],
+        "created_by": row["created_by"],
         "created_at": row["created_at"],
         "last_used_at": row["last_used_at"],
         "revoked_at": row["revoked_at"],
@@ -37,38 +52,71 @@ def _token_dict(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def create_token(db_path: str | Path, name: str, *, expires_at: str | None = None) -> dict[str, Any]:
+def _clean_login(value: str | None, *, require_valid: bool = False) -> str | None:
+    raw = str(value or "").strip()
+    login = normalize_github_login(raw)
+    if raw and not login and require_valid:
+        raise ValueError("invalid GitHub login")
+    return login.lower() if login else None
+
+
+def create_token(db_path: str | Path, name: str, *, expires_at: str | None = None, user_login: str | None = None, created_by: str | None = None) -> dict[str, Any]:
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("token name is required")
+    owner = _clean_login(user_login, require_valid=True)
+    creator = _clean_login(created_by, require_valid=True)
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     token_id = secrets.token_hex(8)
     now = utc_now()
     with _connect(db_path) as con:
         con.execute(
-            """INSERT INTO mcp_tokens(id, name, token_hash, created_at, expires_at)
-            VALUES(?,?,?,?,?)""",
-            (token_id, clean_name, _hash_token(token), now, expires_at),
+            """INSERT INTO mcp_tokens(id, name, token_hash, user_login, created_by, created_at, expires_at)
+            VALUES(?,?,?,?,?,?,?)""",
+            (token_id, clean_name, _hash_token(token), owner, creator, now, expires_at),
         )
-    return {"token": token, "record": {"id": token_id, "name": clean_name, "created_at": now, "last_used_at": None, "revoked_at": None, "expires_at": expires_at}}
+    return {
+        "token": token,
+        "record": {
+            "id": token_id,
+            "name": clean_name,
+            "user_login": owner,
+            "created_by": creator,
+            "created_at": now,
+            "last_used_at": None,
+            "revoked_at": None,
+            "expires_at": expires_at,
+        },
+    }
 
 
-def list_tokens(db_path: str | Path, *, include_revoked: bool = False) -> list[dict[str, Any]]:
+def list_tokens(db_path: str | Path, *, include_revoked: bool = False, user_login: str | None = None) -> list[dict[str, Any]]:
     clauses = []
+    args: list[Any] = []
     if not include_revoked:
         clauses.append("revoked_at IS NULL")
-    sql = "SELECT id, name, created_at, last_used_at, revoked_at, expires_at FROM mcp_tokens"
+    owner = _clean_login(user_login)
+    if owner:
+        clauses.append("lower(user_login)=?")
+        args.append(owner)
+    sql = "SELECT id, name, user_login, created_by, created_at, last_used_at, revoked_at, expires_at FROM mcp_tokens"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY created_at DESC, id DESC"
     with _connect(db_path) as con:
-        return [_token_dict(row) for row in con.execute(sql)]
+        return [_token_dict(row) for row in con.execute(sql, args)]
 
 
-def revoke_token(db_path: str | Path, token_id: str) -> bool:
+def revoke_token(db_path: str | Path, token_id: str, *, user_login: str | None = None) -> bool:
     now = utc_now()
+    args: list[Any] = [now, token_id]
+    owner = _clean_login(user_login)
+    owner_clause = ""
+    if owner:
+        owner_clause = " AND lower(user_login)=?"
+        args.append(owner)
     with _connect(db_path) as con:
-        cur = con.execute("UPDATE mcp_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL", (now, token_id))
+        cur = con.execute(f"UPDATE mcp_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL{owner_clause}", args)
         return cur.rowcount > 0
 
 
@@ -80,7 +128,7 @@ def authenticate_token(db_path: str | Path, token: str) -> dict[str, Any] | None
     now = utc_now()
     with _connect(db_path) as con:
         rows = con.execute(
-            """SELECT id, name, created_at, last_used_at, revoked_at, expires_at
+            """SELECT id, name, user_login, created_by, created_at, last_used_at, revoked_at, expires_at
             FROM mcp_tokens
             WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)""",
             (now,),
