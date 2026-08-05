@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.59.0 (2026-08-05)
+
+### Bug Fixes
+
+- Create mcp token owner index after migration
+  ([`ff4a3a6`](https://github.com/pilipilisbot/github-agent-bridge/commit/ff4a3a68ab8fc17b3f68877e739d4cb7aefb4ce6))
+
+### Features
+
+- Manage MCP tokens per user
+  ([`7db9123`](https://github.com/pilipilisbot/github-agent-bridge/commit/7db9123843acce0ead3013f21357d4ba60dab36c))
+
+
 ## v0.58.4 (2026-08-04)
 
 ### Bug Fixes
