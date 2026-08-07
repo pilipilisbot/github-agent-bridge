@@ -2385,17 +2385,19 @@ function McpUserSelect({
   size?: "default" | "compact";
 }) {
   const selected = ownerOptions.find((option) => option.login === value);
+  const selectedLabel = selected ? `@${selected.login}${selectedSuffix?.(selected) ?? ""}` : emptyLabel;
   return (
-    <div className={cn("relative min-w-0", size === "compact" ? "w-44" : "w-full")}>
-      <span className={cn("pointer-events-none absolute left-2 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center", size === "compact" ? "h-5 w-5" : "h-6 w-6")}>
+    <div className={cn("relative flex min-w-0 items-center gap-2 rounded-md border border-border bg-panel text-foreground focus-within:border-primary focus-within:ring-1 focus-within:ring-primary", disabled ? "opacity-60" : "", size === "compact" ? "h-8 w-44 max-w-full px-2" : "h-9 w-full px-2.5")}>
+      <span className={cn("pointer-events-none flex shrink-0 items-center justify-center", size === "compact" ? "h-5 w-5" : "h-6 w-6")}>
         {selected?.avatar_url ? (
           <img className="h-full w-full rounded-full bg-slate-100" src={safeExternalUrl(selected.avatar_url)} alt="" referrerPolicy="no-referrer" />
         ) : (
           <UserCircle2 className={cn("text-muted", size === "compact" ? "h-4 w-4" : "h-5 w-5")} aria-hidden />
         )}
       </span>
+      <span className={cn("pointer-events-none min-w-0 flex-1 truncate font-mono", selected ? "text-foreground" : "text-muted", size === "compact" ? "text-xs" : "text-sm")}>{selectedLabel}</span>
       <select
-        className={cn("control appearance-none truncate pr-8 font-mono", size === "compact" ? "h-8 min-w-0 pl-8 text-xs" : "pl-10 text-sm")}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
         aria-label={ariaLabel}
         value={value}
         disabled={disabled}
@@ -2408,7 +2410,7 @@ function McpUserSelect({
           </option>
         ))}
       </select>
-      <ChevronDown className={cn("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted", size === "compact" ? "h-3.5 w-3.5" : "h-4 w-4")} aria-hidden />
+      <ChevronDown className={cn("pointer-events-none shrink-0 text-muted", size === "compact" ? "h-3.5 w-3.5" : "h-4 w-4")} aria-hidden />
     </div>
   );
 }
