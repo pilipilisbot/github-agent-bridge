@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.60.0 (2026-08-07)
+
+### Features
+
+- Link mcp tokens to known users
+  ([`3ddc958`](https://github.com/pilipilisbot/github-agent-bridge/commit/3ddc9580ecfe5b4120bb6b9979c7b804c9a07a5b))
+
+
 ## v0.59.0 (2026-08-05)
 
 ### Bug Fixes
