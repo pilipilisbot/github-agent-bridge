@@ -1217,27 +1217,36 @@ def test_dashboard_user_can_manage_only_owned_knowledge_rules(tmp_path):
 def test_dashboard_admin_manages_mcp_tokens(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     JobQueue(db)
-    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice"}, admin_users={"alice"}))
+    legacy = create_token(db, "legacy agent")
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice", "bob"}, admin_users={"alice"}))
     client = TestClient(app)
     client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"})))
 
     reader_created = client.post("/api/mcp/tokens", json={"name": "reader agent"})
     client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"}, is_admin=True)))
+    users = client.get("/api/mcp/users")
     created = client.post("/api/mcp/tokens", json={"name": "local agent", "user_login": "bob"})
+    unknown_owner = client.post("/api/mcp/tokens", json={"name": "typo agent", "user_login": "bbo"})
+    linked = client.patch(f"/api/mcp/tokens/{legacy['record']['id']}", json={"user_login": "bob"})
     listed = client.get("/api/mcp/tokens")
     revoked = client.delete(f"/api/mcp/tokens/{created.json()['record']['id']}")
     listed_after_revoke = client.get("/api/mcp/tokens")
 
     assert reader_created.status_code == 200
     assert reader_created.json()["record"]["user_login"] == "alice"
+    assert {user["login"] for user in users.json()["users"]} == {"alice", "bob"}
     assert created.status_code == 200
     assert created.json()["token"].startswith("gab_mcp_")
     assert created.json()["record"]["user_login"] == "bob"
     assert created.json()["record"]["created_by"] == "alice"
-    assert {token["name"] for token in listed.json()["tokens"]} == {"reader agent", "local agent"}
+    assert unknown_owner.status_code == 400
+    assert unknown_owner.json()["detail"] == "mcp_token_owner_unknown"
+    assert linked.status_code == 200
+    assert linked.json()["token"]["user_login"] == "bob"
+    assert {token["name"] for token in listed.json()["tokens"]} == {"legacy agent", "reader agent", "local agent"}
     assert "token" not in listed.json()["tokens"][0]
     assert revoked.status_code == 200
-    assert [token["name"] for token in listed_after_revoke.json()["tokens"]] == ["reader agent"]
+    assert {token["name"] for token in listed_after_revoke.json()["tokens"]} == {"legacy agent", "reader agent"}
 
 
 def test_dashboard_user_manages_only_own_mcp_tokens(tmp_path):

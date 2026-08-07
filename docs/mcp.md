@@ -28,9 +28,16 @@ gab --db ~/.local/state/github-agent-bridge/bridge.sqlite3 mcp-token-revoke <tok
 
 Dashboard admins can manage the same records through:
 
+- `GET /api/mcp/users`
 - `GET /api/mcp/tokens`
 - `POST /api/mcp/tokens`
+- `PATCH /api/mcp/tokens/{token_id}`
 - `DELETE /api/mcp/tokens/{token_id}`
+
+The dashboard owner selector is built from configured dashboard users, configured
+dashboard admins, the signed-in admin, and any users already linked to existing
+MCP tokens. Admins can use that selector to issue new tokens for a known user or
+link an existing active token to a user without exposing the token secret again.
 
 The dashboard MCP page shows both a public dashboard URL for token management
 and the public MCP endpoint URL. Behind a reverse proxy, set
