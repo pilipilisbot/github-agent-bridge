@@ -192,7 +192,7 @@ class JobQueue:
         job_id: int,
         worker_id: str,
         executor_id: str,
-        identity: dict[str, int],
+        identity: dict[str, int | str],
     ) -> bool:
         """Persist the exact process that owns a running job."""
         now = utc_now()
@@ -217,6 +217,10 @@ class JobQueue:
                 "start_time_ticks": int(identity["start_time_ticks"]),
                 "registered_at": now,
             }
+            for key in ("launcher_pid", "unit", "control_group"):
+                value = identity.get(key)
+                if value is not None:
+                    runtime_process[key] = int(value) if key == "launcher_pid" else str(value)
             metadata["runtime_process"] = runtime_process
             con.execute(
                 "UPDATE jobs SET metadata_json=?, updated_at=? WHERE id=? AND status='running' AND locked_by=?",
@@ -261,29 +265,49 @@ class JobQueue:
             con.commit()
             return bool(cur.rowcount)
 
-    def finish(self, job_id: int, status: str, summary: str, detail: str | None = None) -> None:
+    def finish(
+        self,
+        job_id: int,
+        status: str,
+        summary: str,
+        detail: str | None = None,
+        *,
+        expected_locked_by: str | None = None,
+    ) -> bool:
         now = utc_now()
         with self.connect() as con:
-            row = con.execute("SELECT work_key FROM jobs WHERE id=?", (job_id,)).fetchone()
+            con.execute("BEGIN IMMEDIATE")
+            where = "id=?"
+            args: list[object] = [job_id]
+            if expected_locked_by is not None:
+                where += " AND status='running' AND locked_by=?"
+                args.append(expected_locked_by)
+            row = con.execute(f"SELECT work_key FROM jobs WHERE {where}", args).fetchone()
+            if row is None:
+                con.commit()
+                return False
             metadata = self._job_metadata(con, job_id)
             cancellation = metadata.get("cancellation")
             if isinstance(cancellation, dict) and cancellation.get("state") in {"requested", "cancelled"}:
                 status = "blocked"
                 summary = str(cancellation.get("summary") or summary)
                 detail = str(cancellation.get("detail") or detail or "")
-                con.execute(
-                    "UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=COALESCE(finished_at, ?), updated_at=? WHERE id=?",
-                    (status, detail if status == "blocked" else None, now, now, job_id),
-                )
+                finished_at = "COALESCE(finished_at, ?)"
             else:
-                con.execute(
-                    "UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at=?, updated_at=? WHERE id=?",
-                    (status, detail if status == "blocked" else None, now, now, job_id),
-                )
+                finished_at = "?"
+            cur = con.execute(
+                f"UPDATE jobs SET status=?, last_error=?, locked_by=NULL, finished_at={finished_at}, updated_at=? WHERE {where}",
+                (status, detail if status == "blocked" else None, now, now, *args),
+            )
+            if not cur.rowcount:
+                con.commit()
+                return False
             self._log(con, job_id, row["work_key"] if row else None, status, summary, detail)
             session_id = metadata.get("openclaw_session_id") or session_id_for_job(job_id)
             self._session_event(con, job_id, row["work_key"] if row else None, str(session_id), status, summary, detail)
             self._progress(con, job_id, row["work_key"] if row else None, "semantic", status, summary, detail)
+            con.commit()
+            return True
 
     def request_cancel_running(
         self,

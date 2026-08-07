@@ -5,6 +5,7 @@ from typing import Any
 
 
 PROC_ROOT = Path("/proc")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
 def process_exists(pid: int, proc_root: Path = PROC_ROOT) -> bool:
@@ -55,6 +56,39 @@ def process_io(pid: int, proc_root: Path = PROC_ROOT) -> dict[str, int] | None:
             except ValueError:
                 continue
     return values or None
+
+
+def process_cgroup(pid: int, proc_root: Path = PROC_ROOT) -> str | None:
+    """Return the unified cgroup v2 path for a process."""
+    try:
+        lines = (proc_root / str(pid) / "cgroup").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        hierarchy, controllers, path = line.split(":", 2)
+        if hierarchy == "0" and controllers == "" and path.startswith("/"):
+            return path
+    return None
+
+
+def cgroup_pids(control_group: str, cgroup_root: Path = CGROUP_ROOT) -> list[int]:
+    """List processes directly attached to an exact cgroup v2 path."""
+    normalized = control_group.strip()
+    if not normalized.startswith("/") or ".." in normalized.split("/"):
+        return []
+    try:
+        lines = (cgroup_root / normalized.lstrip("/") / "cgroup.procs").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    except OSError:
+        return []
+    pids: list[int] = []
+    for line in lines:
+        try:
+            pids.append(int(line.strip()))
+        except ValueError:
+            continue
+    return sorted(set(pids))
 
 
 def direct_child_pids(pid: int, proc_root: Path = PROC_ROOT) -> list[int]:

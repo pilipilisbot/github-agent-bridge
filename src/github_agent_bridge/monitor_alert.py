@@ -5,12 +5,14 @@ import json
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from .monitor import ALERT_RUNNING_NO_EXECUTOR_CHILD, ALERT_RUNNING_PROCESS_MISMATCH
+from .job_isolation import is_expected_job_scope
 from .observability import configure_sentry
 
 
@@ -294,14 +296,7 @@ def terminate_process_group(pid: int, grace_seconds: int) -> str:
 
 
 def running_job_ids(output: str) -> list[str]:
-    ids = re.findall(r"running job (\d+)\b", output)
-    no_child_alert = (
-        f"[{ALERT_RUNNING_NO_EXECUTOR_CHILD}]" in output
-        or "running jobs exist but executor has no child process" in output
-    )
-    if no_child_alert:
-        ids.extend(re.findall(r"running detail: job=(\d+)\b", output))
-    return list(dict.fromkeys(ids))
+    return list(dict.fromkeys(re.findall(r"running job (\d+)\b", output)))
 
 
 def process_mismatch_job_ids(output: str) -> list[str]:
@@ -310,7 +305,6 @@ def process_mismatch_job_ids(output: str) -> list[str]:
     return list(
         dict.fromkeys(
             re.findall(r"running job (\d+) process ownership mismatch", output)
-            + re.findall(r"running detail: job=(\d+)\b", output)
         )
     )
 
@@ -341,23 +335,63 @@ def block_orphaned_jobs(
     return proc.stdout
 
 
+def runtime_scope_for_job(config: AlertConfig, job_id: str) -> str | None:
+    try:
+        numeric_job_id = int(job_id)
+        con = sqlite3.connect(_expand(config.db))
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            "SELECT attempts, metadata_json FROM jobs WHERE id=? AND status='running'",
+            (numeric_job_id,),
+        ).fetchone()
+        con.close()
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return None
+    if row is None:
+        return None
+    try:
+        metadata = json.loads(row["metadata_json"] or "{}")
+        runtime = metadata.get("runtime_process") or {}
+        unit = str(runtime.get("unit") or "")
+        attempt = int(row["attempts"])
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return unit if is_expected_job_scope(unit, numeric_job_id, attempt) else None
+
+
 def reconcile_process_mismatch(config: AlertConfig, job_ids: list[str]) -> str:
-    """Restart the whole executor cgroup so detached descendants cannot survive."""
-    main_pid = get_main_pid(config.executor_unit)
-    restart_output = ""
-    if main_pid and main_pid != "0":
-        proc = _run(["systemctl", "--user", "restart", config.executor_unit])
-        returncode = int(getattr(proc, "returncode", 0) or 0)
-        restart_output = f"executor cgroup restart rc={returncode}\n"
-        if proc.stdout:
-            restart_output += proc.stdout
-    blocked_output = block_orphaned_jobs(
-        config,
-        job_ids,
-        "The registered root process no longer matched this running job. The complete executor cgroup was restarted so detached descendants were stopped; the job was blocked and not auto-requeued.",
-        older_than_seconds=0,
-    )
-    return restart_output + blocked_output
+    """Stop only mismatched job scopes; never restart the shared executor."""
+    output: list[str] = []
+    isolated_ids: list[str] = []
+    for job_id in dict.fromkeys(job_ids):
+        unit = runtime_scope_for_job(config, job_id)
+        if not unit:
+            output.append(
+                f"job {job_id}: no validated per-job scope; left running for manual inspection"
+            )
+            continue
+        before = (_run(["systemctl", "--user", "is-active", unit]).stdout or "").strip()
+        if before in {"active", "activating", "deactivating"}:
+            proc = _run(["systemctl", "--user", "stop", unit])
+            if int(getattr(proc, "returncode", 0) or 0) != 0:
+                output.append(f"job {job_id}: failed to stop {unit}")
+                continue
+        after = (_run(["systemctl", "--user", "is-active", unit]).stdout or "").strip()
+        if after in {"active", "activating", "deactivating"}:
+            output.append(f"job {job_id}: {unit} remained {after}; job left running")
+            continue
+        isolated_ids.append(job_id)
+        output.append(f"job {job_id}: stopped isolated scope {unit}")
+    if isolated_ids:
+        blocked = block_orphaned_jobs(
+            config,
+            isolated_ids,
+            "The registered process no longer matched this running job. Its isolated job scope was stopped; the executor and other workers were left running. The job was blocked and not auto-requeued.",
+            older_than_seconds=0,
+        )
+        if blocked:
+            output.append(blocked.rstrip())
+    return "\n".join(output) + ("\n" if output else "")
 
 
 def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
@@ -374,23 +408,12 @@ def maybe_unlock_stale(config: AlertConfig, output: str) -> str:
             job_ids,
             "The executor service is inactive and no process owns this stale running job. It was not auto-requeued.",
         )
-    child_output = ""
-    if has_child_processes(main_pid):
-        if not config.kill_stale_children:
-            return ""
-        sample_output = sample_executor_activity(config, main_pid=main_pid)
-        sample = load_proc_state(config.proc_state_file)
-        idle_seconds = int(sample.get("idle_seconds") or 0)
-        if sample.get("active_since_last_sample", True) or idle_seconds < config.proc_idle_seconds:
-            return sample_output
-        results = [terminate_process_group(pid, config.terminate_grace_seconds) for pid in child_pids(main_pid)]
-        child_output = sample_output + "terminated stale child processes:\n" + "\n".join(results) + "\n"
-    blocked_output = block_orphaned_jobs(
-        config,
-        job_ids,
-        "No live executor child owns this stale running job. It was blocked after process reconciliation and not auto-requeued.",
-    )
-    return child_output + blocked_output
+    # Age or lack of visible progress is not proof that a process is orphaned.
+    # Keep these alerts observational while the executor is alive; automatic
+    # termination is reserved for an explicit runtime ownership mismatch above.
+    if config.kill_stale_children:
+        return sample_executor_activity(config, main_pid=main_pid)
+    return ""
 
 
 def load_state(path: Path) -> tuple[str, int]:

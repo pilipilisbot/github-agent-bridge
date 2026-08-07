@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from github_agent_bridge.process_inspection import direct_children, inspect_process, process_identity_matches
+from github_agent_bridge.process_inspection import (
+    cgroup_pids,
+    direct_children,
+    inspect_process,
+    process_cgroup,
+    process_identity_matches,
+)
 
 
 def write_proc(root: Path, pid: int, *, ppid: int, cmd: str, cpu_user: int = 1, cpu_system: int = 2, read_bytes: int = 3, write_bytes: int = 4) -> None:
@@ -44,3 +50,26 @@ def test_process_identity_matches_pid_birth_and_parent(tmp_path):
     assert process_identity_matches(30, 3000, expected_ppid=10, proc_root=tmp_path) is True
     assert process_identity_matches(30, 2999, expected_ppid=10, proc_root=tmp_path) is False
     assert process_identity_matches(30, 3000, expected_ppid=11, proc_root=tmp_path) is False
+
+
+def test_process_cgroup_reads_unified_v2_path(tmp_path):
+    proc = tmp_path / "40"
+    proc.mkdir()
+    (proc / "cgroup").write_text(
+        "1:name=systemd:/legacy\n"
+        "0::/user.slice/user-1000.slice/app.slice/job.scope\n",
+        encoding="utf-8",
+    )
+
+    assert process_cgroup(40, proc_root=tmp_path) == (
+        "/user.slice/user-1000.slice/app.slice/job.scope"
+    )
+
+
+def test_cgroup_pids_reads_only_exact_valid_path(tmp_path):
+    group = tmp_path / "user.slice" / "job.scope"
+    group.mkdir(parents=True)
+    (group / "cgroup.procs").write_text("42\n41\n42\ninvalid\n", encoding="utf-8")
+
+    assert cgroup_pids("/user.slice/job.scope", cgroup_root=tmp_path) == [41, 42]
+    assert cgroup_pids("../job.scope", cgroup_root=tmp_path) == []

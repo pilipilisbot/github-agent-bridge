@@ -634,3 +634,26 @@ def test_runtime_process_is_bound_to_running_job_worker(tmp_path):
     runtime = q.get(queued.id).metadata["runtime_process"]
     assert runtime["state"] == "exited"
     assert runtime["exited_at"].endswith("Z")
+
+
+def test_worker_finish_cannot_overwrite_job_blocked_by_monitor(tmp_path):
+    q = JobQueue(tmp_path / "q.sqlite3")
+    queued, _ = q.enqueue(notif(1, "<1@github.com>", BODY1), policy())
+    worker_id = "executor-123-deadbeef/worker-0"
+    claimed = q.claim_next(worker_id)
+    assert claimed is not None
+
+    assert q.block_running("scope stopped", "isolated process mismatch", job_ids=[claimed.id]) == [
+        claimed.id
+    ]
+    assert q.finish(
+        claimed.id,
+        "done",
+        "late worker result",
+        expected_locked_by=worker_id,
+    ) is False
+
+    stored = q.get(queued.id)
+    assert stored is not None
+    assert stored.status == "blocked"
+    assert stored.last_error == "isolated process mismatch"

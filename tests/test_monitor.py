@@ -240,6 +240,49 @@ def test_monitor_accepts_registered_job_process_identity(tmp_path, monkeypatch):
     assert "monitor.running_process_mismatch" not in report.metrics.get("alert_codes", [])
 
 
+def test_monitor_accepts_process_in_matching_job_scope(tmp_path, monkeypatch):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    q.enqueue(notif(), Policy(trusted_orgs={"gisce"}))
+    executor_id = "executor-123-deadbeef"
+    worker_id = f"{executor_id}/worker-0"
+    job = q.claim_next(worker_id)
+    assert job is not None
+    unit = f"github-agent-bridge-job-{job.id}-attempt-{job.attempts}.scope"
+    control_group = f"/user.slice/{unit}"
+    q.register_runtime_process(
+        job.id,
+        worker_id,
+        executor_id,
+        {
+            "pid": 456,
+            "ppid": 789,
+            "pgid": 456,
+            "sid": 456,
+            "start_time_ticks": 999,
+            "launcher_pid": 789,
+            "unit": unit,
+            "control_group": control_group,
+        },
+    )
+    q.set_state("executor_process_tracking_id", executor_id)
+    monkeypatch.setattr(monitor_module, "_is_active", lambda unit: "active")
+    monkeypatch.setattr(monitor_module, "_main_pid", lambda unit: 123)
+    monkeypatch.setattr(
+        monitor_module,
+        "_direct_children",
+        lambda pid: [{"pid": 789, "cmd": "systemd-run --scope"}],
+    )
+    monkeypatch.setattr(monitor_module, "_last_service_result", lambda unit: ("success", "0", 42))
+    monkeypatch.setattr(monitor_module, "process_identity_matches", lambda *args, **kwargs: True)
+    monkeypatch.setattr(monitor_module, "process_cgroup", lambda pid: control_group)
+
+    report = monitor(db)
+
+    assert "monitor.running_process_mismatch" not in report.metrics.get("alert_codes", [])
+    assert f"unit={unit}" in report.text()
+
+
 def test_monitor_persists_process_samples_and_alert_state(tmp_path, monkeypatch):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)

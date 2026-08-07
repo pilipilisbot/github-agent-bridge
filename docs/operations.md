@@ -277,29 +277,35 @@ the latest semantic heartbeat, visible OpenClaw output, and persisted
 CPU/I/O/PID-tree activity to decide whether an old running job looks stalled.
 Use `--progress-warn-seconds` to tune how long a running job can go without a
 semantic or visible progress update before the monitor considers it quiet.
-The alert wrapper uses the same composite stalled-job alert before automatic
-unlock or child termination. It does not unlock every old running job; it passes
-only the job ids that the monitor flagged as stalled.
+Stalled-job detection is alert-only: age or lack of visible progress is not
+proof that a process is orphaned, so it never terminates or unlocks a job.
 
 Each live dispatch also records its executor generation, worker id, root PID,
 parent PID, process group/session ids, and Linux process start time in the job
 metadata. The start time prevents PID reuse from making a dead job look alive.
-When the monitor finds a running job whose registered root process is dead,
-reparented, reused, or owned by another executor generation, it restarts the
-complete executor systemd cgroup and leaves the affected work blocked. This
-restart is deliberately broader than `killpg`: tools may create new process
-groups or sessions, but they remain in the service cgroup and are therefore
-terminated together. `KillMode=control-group` and `TimeoutStopSec=30s` in the
-executor unit make that cleanup explicit.
+Every attempt runs in a deterministic transient systemd scope named
+`github-agent-bridge-job-<job-id>-attempt-<attempt>.scope`. The monitor validates
+the exact unit name, cgroup path, PID, and process start time. If that ownership
+does not match, it stops only the validated job scope and marks only that job
+`blocked`. It never restarts the shared executor as job-level remediation. If
+scope metadata is absent or does not match the job and attempt, the monitor
+alerts and leaves the process and job untouched for manual inspection.
+
+Bridge jobs use OpenClaw's local embedded mode. Agent and tool processes
+therefore run in that job's scope instead of being owned and recoverable by the
+gateway. `KillMode=control-group` terminates the complete tree for one attempt,
+including tools that create their own process groups or sessions, without
+touching the executor or another worker. The configured worker count is also
+the global concurrency limit for bridge work. Normal local dispatches share a
+versioned per-thread OpenClaw session key that cannot collide with legacy
+gateway-dispatched runs. Explicit recovery retries receive an attempt-scoped
+rescue key so stale local session state cannot race or resume the new attempt.
 
 Set `GITHUB_AGENT_BRIDGE_KILL_STALE_CHILDREN=1` in the private systemd env file
-to let `github-agent-bridge-monitor-alert` terminate stale executor child
-process groups before retrying stalled jobs. The wrapper samples every direct
-executor child and its descendants, then only terminates children when the whole
-sample has been idle for `GITHUB_AGENT_BRIDGE_PROC_IDLE_SECONDS` seconds. It
-sends `SIGTERM`, waits `GITHUB_AGENT_BRIDGE_TERMINATE_GRACE_SECONDS`, and then
-uses `SIGKILL` if the child process group is still present. Keep this disabled
-unless the bridge host is allowed to clean up stuck OpenClaw runs automatically.
+only if legacy process-activity sampling is still required. This option no
+longer authorizes termination based on age or idleness; automatic remediation
+is restricted to an explicit ownership mismatch and the exact validated
+per-job scope.
 
 ## Dashboard API service
 

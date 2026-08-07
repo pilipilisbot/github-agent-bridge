@@ -77,19 +77,25 @@ def test_shadow_dispatch_returns_command_without_running():
     result = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW).dispatch(make_job(), Policy(trusted_orgs={"gisce"}), reaction_ok=True)
     assert result.ok is True
     assert result.command
+    assert result.command[0] == "systemd-run"
+    assert "--scope" in result.command
+    assert "--unit=github-agent-bridge-job-1-attempt-1.scope" in result.command
     assert "agent" in result.command
+    assert "--local" in result.command
     assert "--model" not in result.command
     assert "--thinking" not in result.command
     assert "--session-id" in result.command
     assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-1-attempt-1"
     assert "--session-key" in result.command
-    assert result.command[result.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
+    assert result.command[result.command.index("--session-key") + 1] == (
+        "github-agent-bridge:local-v2:gisce-erp-1"
+    )
     assert result.command[result.command.index("--verbose") + 1] == "on"
     assert "--timeout" in result.command
     assert "3600" in result.command
 
 
-def test_work_allowed_dispatch_uses_fresh_session_id_per_job_attempt_with_stable_session_key():
+def test_work_allowed_dispatch_uses_fresh_session_id_and_stable_thread_key():
     dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
     policy = Policy(trusted_orgs={"gisce"})
     first = dispatcher.dispatch(make_job(), policy, reaction_ok=True)
@@ -102,9 +108,15 @@ def test_work_allowed_dispatch_uses_fresh_session_id_per_job_attempt_with_stable
     assert first.command[first.command.index("--session-id") + 1] == "github-agent-bridge-job-1-attempt-1"
     assert second.command[second.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-1"
     assert retry.command[retry.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
-    assert first.command[first.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
-    assert first.command[first.command.index("--session-key") + 1] == second.command[second.command.index("--session-key") + 1]
-    assert second.command[second.command.index("--session-key") + 1] == retry.command[retry.command.index("--session-key") + 1]
+    assert first.command[first.command.index("--session-key") + 1] == (
+        "github-agent-bridge:local-v2:gisce-erp-1"
+    )
+    assert second.command[second.command.index("--session-key") + 1] == (
+        "github-agent-bridge:local-v2:gisce-erp-1"
+    )
+    assert retry.command[retry.command.index("--session-key") + 1] == (
+        "github-agent-bridge:local-v2:gisce-erp-1"
+    )
 
 
 def test_compaction_retry_uses_fresh_session_key_and_id_for_review_only_work():
@@ -118,7 +130,7 @@ def test_compaction_retry_uses_fresh_session_key_and_id_for_review_only_work():
     assert result.command
     assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
     assert result.command[result.command.index("--session-key") + 1] == (
-        "github-agent-bridge:gisce-erp-1:fresh:2:attempt:2"
+        "github-agent-bridge:local-v2:gisce-erp-1:fresh:2:attempt:2"
     )
 
 
@@ -134,7 +146,7 @@ def test_work_allowed_dispatch_ignores_legacy_session_id_metadata():
     assert result.command[result.command.index("--session-id") + 1] == "github-agent-bridge-job-2-attempt-2"
 
 
-def test_review_only_dispatch_session_key_remains_stable_for_same_github_thread():
+def test_review_only_dispatch_uses_stable_thread_key():
     dispatcher = OpenClawDispatcher(openclaw_bin="definitely-not-present", mode=RunMode.SHADOW)
     policy = Policy(trusted_orgs={"gisce"})
     first = dispatcher.dispatch(make_job("review_only"), policy, reaction_ok=True)
@@ -144,8 +156,12 @@ def test_review_only_dispatch_session_key_remains_stable_for_same_github_thread(
     assert second.command
     assert first.command[first.command.index("--session-id") + 1] == "github-agent-bridge-job-1"
     assert second.command[second.command.index("--session-id") + 1] == "github-agent-bridge-job-2"
-    assert first.command[first.command.index("--session-key") + 1] == "github-agent-bridge:gisce-erp-1"
-    assert first.command[first.command.index("--session-key") + 1] == second.command[second.command.index("--session-key") + 1]
+    assert first.command[first.command.index("--session-key") + 1] == (
+        "github-agent-bridge:local-v2:gisce-erp-1"
+    )
+    assert second.command[second.command.index("--session-key") + 1] == (
+        "github-agent-bridge:local-v2:gisce-erp-1"
+    )
 
 
 def test_review_only_dispatch_uses_shorter_timeout():
@@ -211,7 +227,12 @@ def test_live_dispatch_streams_openclaw_output_to_activity_callback(tmp_path):
     events = []
     processes = []
 
-    result = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1).dispatch(
+    result = OpenClawDispatcher(
+        openclaw_bin=str(openclaw),
+        mode=RunMode.LIVE,
+        cli_grace_seconds=1,
+        systemd_run_bin=None,
+    ).dispatch(
         make_job(),
         Policy(trusted_orgs={"gisce"}),
         reaction_ok=True,
@@ -246,7 +267,12 @@ def test_live_dispatch_streams_partial_openclaw_output_before_process_exits(tmp_
     monkeypatch.setenv("DONE_FILE", str(done))
     callback_observed_done = []
 
-    result = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1).dispatch(
+    result = OpenClawDispatcher(
+        openclaw_bin=str(openclaw),
+        mode=RunMode.LIVE,
+        cli_grace_seconds=1,
+        systemd_run_bin=None,
+    ).dispatch(
         make_job(),
         Policy(trusted_orgs={"gisce"}),
         reaction_ok=True,
@@ -272,7 +298,12 @@ def test_dispatcher_shutdown_terminates_active_process_group(tmp_path, monkeypat
     )
     openclaw.chmod(0o755)
     monkeypatch.setenv("STARTED_FILE", str(started))
-    dispatcher = OpenClawDispatcher(openclaw_bin=str(openclaw), mode=RunMode.LIVE, cli_grace_seconds=1)
+    dispatcher = OpenClawDispatcher(
+        openclaw_bin=str(openclaw),
+        mode=RunMode.LIVE,
+        cli_grace_seconds=1,
+        systemd_run_bin=None,
+    )
     results = []
     thread = threading.Thread(
         target=lambda: results.append(dispatcher.dispatch(make_job(), Policy(trusted_orgs={"gisce"}))),

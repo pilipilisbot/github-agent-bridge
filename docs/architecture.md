@@ -71,9 +71,13 @@ That permits parallelism across unrelated PRs/issues while serializing a single 
 Dispatch has two external side effects in live mode:
 
 1. apply GitHub 👀 reaction when possible;
-2. send one OpenClaw agent task with prompt rules and repository role context.
+2. run one local OpenClaw agent task with prompt rules and repository role
+   context.
 
 If dispatch fails, the job is marked `blocked`, `last_error` is stored, and the lock is released.
+Each attempt runs in its own transient systemd scope. Agent and tool descendants
+stay inside that scope, so the worker limit is a global concurrency boundary and
+job-level remediation cannot stop the executor or another worker.
 
 ## Prompt resources
 
