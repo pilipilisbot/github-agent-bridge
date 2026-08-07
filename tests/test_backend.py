@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -1216,7 +1217,13 @@ def test_dashboard_user_can_manage_only_owned_knowledge_rules(tmp_path):
 
 def test_dashboard_admin_manages_mcp_tokens(tmp_path):
     db = tmp_path / "bridge.sqlite3"
-    JobQueue(db)
+    q = JobQueue(db)
+    q.enqueue(
+        notif(body="@pilipilisbot https://github.com/pilipilisbot/github-agent-bridge/issues/182#issuecomment-1"),
+        Policy(trusted_orgs=["pilipilisbot"]),
+    )
+    with sqlite3.connect(db) as con:
+        con.execute("UPDATE jobs SET trigger_actor=?, trigger_actor_avatar_url=? WHERE id=1", ("pilipilisbot", "https://github.com/pilipilisbot.png?size=80"))
     legacy = create_token(db, "legacy agent")
     app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice", "bob"}, admin_users={"alice"}))
     client = TestClient(app)
@@ -1234,7 +1241,7 @@ def test_dashboard_admin_manages_mcp_tokens(tmp_path):
 
     assert reader_created.status_code == 200
     assert reader_created.json()["record"]["user_login"] == "alice"
-    assert {user["login"] for user in users.json()["users"]} == {"alice", "bob"}
+    assert {user["login"] for user in users.json()["users"]} == {"alice", "bob", "pilipilisbot"}
     assert created.status_code == 200
     assert created.json()["token"].startswith("gab_mcp_")
     assert created.json()["record"]["user_login"] == "bob"

@@ -399,6 +399,10 @@ def _known_mcp_user_profiles(config: DashboardConfig, *, current_login: str = ""
     logins = {login.lower() for login in config.allowed_users | config.admin_users if login}
     if current_login:
         logins.add(current_login.lower())
+    for actor in list_job_actors(config.db, limit=200):
+        login = str(actor.get("login") or "").strip().lower()
+        if login:
+            logins.add(login)
     for token in list_tokens(config.db, include_revoked=True):
         login = str(token.get("user_login") or "").strip().lower()
         if login:

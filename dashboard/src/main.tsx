@@ -2141,14 +2141,15 @@ function McpPage({
           </Field>
           {user?.is_admin ? (
             <Field label="Owner">
-              <select className="control" aria-label="Owner" value={userLogin} disabled={creating || ownerOptions.length === 0} onChange={(event) => setUserLogin(event.target.value)}>
-                {ownerOptions.length === 0 ? <option value="">No known users</option> : null}
-                {ownerOptions.map((option) => (
-                  <option key={option.login} value={option.login}>
-                    @{option.login}{option.login === user?.login ? " (you)" : ""}
-                  </option>
-                ))}
-              </select>
+              <McpUserSelect
+                ariaLabel="Owner"
+                value={userLogin}
+                ownerOptions={ownerOptions}
+                disabled={creating || ownerOptions.length === 0}
+                selectedSuffix={(option) => option.login === user?.login ? " (you)" : ""}
+                emptyLabel="No known users"
+                onChange={setUserLogin}
+              />
               {selectedOwner ? <span className="font-normal text-muted">Token will be linked to @{selectedOwner.login}.</span> : null}
             </Field>
           ) : null}
@@ -2349,23 +2350,66 @@ function McpTokenList({
 function McpOwnerSelect({ token, ownerOptions, disabled, onUpdateOwner }: { token: McpTokenRecord; ownerOptions: UserProfile[]; disabled: boolean; onUpdateOwner: (tokenId: string, userLogin: string) => Promise<void> }) {
   const value = token.user_login ?? "";
   return (
-    <select
-      className="control h-8 min-w-[10rem] text-xs"
-      aria-label={`Owner for ${token.name}`}
+    <McpUserSelect
+      ariaLabel={`Owner for ${token.name}`}
       value={value}
+      ownerOptions={ownerOptions}
       disabled={disabled || ownerOptions.length === 0}
-      onChange={(event) => {
-        if (!event.target.value || event.target.value === token.user_login) return;
-        void onUpdateOwner(token.id, event.target.value);
+      emptyLabel="Select owner"
+      size="compact"
+      onChange={(nextOwner) => {
+        if (!nextOwner || nextOwner === token.user_login) return;
+        void onUpdateOwner(token.id, nextOwner);
       }}
-    >
-      {!value ? <option value="">Select owner</option> : null}
-      {ownerOptions.map((option) => (
-        <option key={option.login} value={option.login}>
-          @{option.login}
-        </option>
-      ))}
-    </select>
+    />
+  );
+}
+
+function McpUserSelect({
+  value,
+  ownerOptions,
+  disabled,
+  onChange,
+  ariaLabel,
+  selectedSuffix,
+  emptyLabel,
+  size = "default",
+}: {
+  value: string;
+  ownerOptions: UserProfile[];
+  disabled: boolean;
+  onChange: (userLogin: string) => void;
+  ariaLabel: string;
+  selectedSuffix?: (option: UserProfile) => string;
+  emptyLabel: string;
+  size?: "default" | "compact";
+}) {
+  const selected = ownerOptions.find((option) => option.login === value);
+  return (
+    <div className={cn("relative min-w-0", size === "compact" ? "w-44" : "w-full")}>
+      <span className={cn("pointer-events-none absolute left-2 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center", size === "compact" ? "h-5 w-5" : "h-6 w-6")}>
+        {selected?.avatar_url ? (
+          <img className="h-full w-full rounded-full bg-slate-100" src={safeExternalUrl(selected.avatar_url)} alt="" referrerPolicy="no-referrer" />
+        ) : (
+          <UserCircle2 className={cn("text-muted", size === "compact" ? "h-4 w-4" : "h-5 w-5")} aria-hidden />
+        )}
+      </span>
+      <select
+        className={cn("control appearance-none truncate pr-8 font-mono", size === "compact" ? "h-8 min-w-0 pl-8 text-xs" : "pl-10 text-sm")}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {ownerOptions.length === 0 || !value ? <option value="">{emptyLabel}</option> : null}
+        {ownerOptions.map((option) => (
+          <option key={option.login} value={option.login}>
+            @{option.login}{selectedSuffix?.(option) ?? ""}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className={cn("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted", size === "compact" ? "h-3.5 w-3.5" : "h-4 w-4")} aria-hidden />
+    </div>
   );
 }
 
