@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from github_agent_bridge import __version__
 from github_agent_bridge import feedback
 from github_agent_bridge.backend import DashboardConfig, _encode_session, _is_admin, _is_allowed, _journal_stream_events, _session_stream_events, _sign, create_app
-from github_agent_bridge.dashboard_data import get_job_detail, job_session, job_session_events, job_session_transcript, list_job_actors, list_jobs, metrics_summary
+from github_agent_bridge.dashboard_data import get_job_detail, job_session, job_session_events, job_session_transcript, list_all_job_actor_logins, list_job_actors, list_jobs, metrics_summary
 from github_agent_bridge.monitor import MonitorReport
 from github_agent_bridge.models import GitHubContext, Notification
 from github_agent_bridge.mcp import create_token
@@ -1254,6 +1254,27 @@ def test_dashboard_admin_manages_mcp_tokens(tmp_path):
     assert "token" not in listed.json()["tokens"][0]
     assert revoked.status_code == 200
     assert {token["name"] for token in listed_after_revoke.json()["tokens"]} == {"legacy agent", "reader agent"}
+
+
+def test_dashboard_mcp_users_include_all_job_actors(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    policy = Policy(trusted_orgs=["pilipilisbot"])
+    for index in range(205):
+        q.enqueue(
+            notif(uid=index + 1, mid=f"<{index + 1}@github.com>", from_addr=f"user{index:03d} <notifications@github.com>"),
+            policy,
+        )
+    app = create_app(DashboardConfig(db=db, secret_key="secret", allowed_users={"alice"}, admin_users={"alice"}))
+    client = TestClient(app)
+    client.cookies.set("gab_dashboard_session", _sign(app.state.dashboard_config, _encode_session({"login": "Alice"}, is_admin=True)))
+
+    response = client.get("/api/mcp/users")
+    logins = {user["login"] for user in response.json()["users"]}
+
+    assert len(list_job_actors(db)) == 100
+    assert len(list_all_job_actor_logins(db)) == 205
+    assert {"alice", "user000", "user204"} <= logins
 
 
 def test_dashboard_user_manages_only_own_mcp_tokens(tmp_path):

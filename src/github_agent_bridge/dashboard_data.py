@@ -316,6 +316,25 @@ def list_job_actors(db: str | Path, *, limit: int = 100) -> list[dict[str, Any]]
     ]
 
 
+def list_all_job_actor_logins(db: str | Path) -> list[str]:
+    path = Path(db).expanduser()
+    if not path.exists():
+        return []
+    with readonly_connect(path) as con:
+        if not table_exists(con, "jobs") or not column_exists(con, "jobs", "trigger_actor"):
+            return []
+        rows = con.execute(
+            """
+            SELECT lower(trigger_actor) AS login
+            FROM jobs
+            WHERE trigger_actor IS NOT NULL AND trigger_actor != ''
+            GROUP BY lower(trigger_actor)
+            ORDER BY login
+            """
+        ).fetchall()
+    return [str(row["login"]) for row in rows if row["login"]]
+
+
 def get_job_detail(db: str | Path, job_id: int) -> dict[str, Any] | None:
     path = Path(db).expanduser()
     if not path.exists():
