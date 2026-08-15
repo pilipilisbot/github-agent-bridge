@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v0.60.1 (2026-08-15)
+
+### Bug Fixes
+
+- Center MCP owner selectors
+  ([`ef2db7f`](https://github.com/pilipilisbot/github-agent-bridge/commit/ef2db7f64f90fe0e5fbf3fb6287dde07f2286424))
+
+- Improve MCP user selector
+  ([`f1f1c68`](https://github.com/pilipilisbot/github-agent-bridge/commit/f1f1c6868f5136f04852357fdce80cad7673598a))
+
+- Include all job actors in MCP users
+  ([`8c84041`](https://github.com/pilipilisbot/github-agent-bridge/commit/8c84041f05e3a77da2895394c21a9eb8e35eb894))
+
+
 ## v0.60.0 (2026-08-07)
 
 ### Features
