@@ -43,6 +43,7 @@ from .dashboard_data import (
     job_session,
     job_session_events,
     job_session_transcript,
+    list_all_job_actor_logins,
     list_job_actors,
     list_jobs,
     metrics_summary,
@@ -399,6 +400,10 @@ def _known_mcp_user_profiles(config: DashboardConfig, *, current_login: str = ""
     logins = {login.lower() for login in config.allowed_users | config.admin_users if login}
     if current_login:
         logins.add(current_login.lower())
+    for actor_login in list_all_job_actor_logins(config.db):
+        login = str(actor_login).strip().lower()
+        if login:
+            logins.add(login)
     for token in list_tokens(config.db, include_revoked=True):
         login = str(token.get("user_login") or "").strip().lower()
         if login:
