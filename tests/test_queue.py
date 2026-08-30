@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from github_agent_bridge.models import Notification
 from github_agent_bridge.intent_classifier import IntentClassification
 from github_agent_bridge.policy import FeedbackLearning, IntentClassifier, Policy
@@ -634,3 +636,13 @@ def test_runtime_process_is_bound_to_running_job_worker(tmp_path):
     runtime = q.get(queued.id).metadata["runtime_process"]
     assert runtime["state"] == "exited"
     assert runtime["exited_at"].endswith("Z")
+
+
+def test_context_manager_closes_connection(tmp_path):
+    queue = JobQueue(tmp_path / "queue.sqlite3")
+
+    with queue.connect() as con:
+        assert con.execute("SELECT 1").fetchone()[0] == 1
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        con.execute("SELECT 1")
