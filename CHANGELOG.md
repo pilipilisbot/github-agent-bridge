@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.60.2 (2026-09-01)
+
+### Bug Fixes
+
+- Mark cancelled jobs as done
+  ([`971677d`](https://github.com/pilipilisbot/github-agent-bridge/commit/971677d29a808e31bcecd77c26c57b57fbbc01fa))
+
+
 ## v0.60.1 (2026-08-15)
 
 ### Bug Fixes
