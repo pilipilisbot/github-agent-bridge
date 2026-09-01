@@ -26,6 +26,16 @@ ACTIVE_STATUSES = ("pending", "running", "waiting_approval")
 COALESCE_STATUSES = ("pending", "waiting_approval")
 
 
+class ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context-managed connection, then close it."""
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class JobQueue:
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser()
@@ -34,7 +44,12 @@ class JobQueue:
     def connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         initialize = not self.path.exists()
-        con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        con = sqlite3.connect(
+            self.path,
+            timeout=30,
+            isolation_level=None,
+            factory=ClosingConnection,
+        )
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
         if initialize:
