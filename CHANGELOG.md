@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.60.3 (2026-09-01)
+
+### Bug Fixes
+
+- Close context-managed sqlite connections
+  ([`9acdf0c`](https://github.com/pilipilisbot/github-agent-bridge/commit/9acdf0cc50950cda51d8de71bc7fb58d30b8ace7))
+
+
 ## v0.60.2 (2026-09-01)
 
 ### Bug Fixes
