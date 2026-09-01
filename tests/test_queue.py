@@ -273,16 +273,17 @@ def test_cancel_running_records_actor_reason_and_finish_preserves_cancellation(t
 
     cancelled = q.mark_cancelled(claimed.id, actor="ecarreras", reason="stale request", signal_detail="sent SIGTERM", followup_url="https://github.com/gisce/erp/issues/1#issuecomment-2")
     assert cancelled is not None
-    assert cancelled.status == "blocked"
+    assert cancelled.status == "done"
     assert cancelled.metadata["cancellation"]["state"] == "cancelled"
     assert cancelled.metadata["cancellation"]["actor"] == "ecarreras"
-    assert "stale request" in (cancelled.last_error or "")
+    assert cancelled.last_error is None
 
     q.finish(claimed.id, "done", "late dispatch completion", "ok")
     stored = q.get(claimed.id)
     assert stored is not None
-    assert stored.status == "blocked"
-    assert "stale request" in (stored.last_error or "")
+    assert stored.status == "done"
+    assert stored.last_error is None
+    assert stored.metadata["cancellation"]["reason"] == "stale request"
 
 
 def test_mark_cancelled_handles_finish_after_cancel_request(tmp_path):
@@ -305,10 +306,11 @@ def test_mark_cancelled_handles_finish_after_cancel_request(tmp_path):
     )
 
     assert cancelled is not None
-    assert cancelled.status == "blocked"
+    assert cancelled.status == "done"
     assert cancelled.metadata["cancellation"]["state"] == "cancelled"
     assert cancelled.metadata["cancellation"]["signal_detail"] == "runtime already exited"
-    assert "followup_url=https://github.com/gisce/erp/issues/1#issuecomment-2" in (cancelled.last_error or "")
+    assert cancelled.last_error is None
+    assert cancelled.metadata["cancellation"]["followup_url"] == "https://github.com/gisce/erp/issues/1#issuecomment-2"
 
 
 def test_claim_fresh_review_retry_records_attempt_session_id(tmp_path):

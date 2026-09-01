@@ -268,7 +268,7 @@ class JobQueue:
             metadata = self._job_metadata(con, job_id)
             cancellation = metadata.get("cancellation")
             if isinstance(cancellation, dict) and cancellation.get("state") in {"requested", "cancelled"}:
-                status = "blocked"
+                status = "done"
                 summary = str(cancellation.get("summary") or summary)
                 detail = str(cancellation.get("detail") or detail or "")
                 con.execute(
@@ -337,7 +337,7 @@ class JobQueue:
         signal_detail: str | None = None,
         followup_url: str | None = None,
     ) -> Job | None:
-        """Mark a running job as manually cancelled using the existing blocked state."""
+        """Mark a running job as manually cancelled."""
         now = utc_now()
         clean_actor = actor.strip().lstrip("@") or "unknown"
         clean_reason = (reason or "").strip()
@@ -377,9 +377,9 @@ class JobQueue:
                     return None
             cur = con.execute(
                 """UPDATE jobs
-                SET status='blocked', locked_by=NULL, last_error=?, finished_at=COALESCE(finished_at, ?), updated_at=?, metadata_json=?
+                SET status='done', locked_by=NULL, last_error=NULL, finished_at=COALESCE(finished_at, ?), updated_at=?, metadata_json=?
                 WHERE id=?""",
-                (detail, now, now, json.dumps(metadata, sort_keys=True), job_id),
+                (now, now, json.dumps(metadata, sort_keys=True), job_id),
             )
             if not cur.rowcount:
                 con.commit()

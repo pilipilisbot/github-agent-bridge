@@ -503,7 +503,7 @@ def test_dashboard_job_owner_can_cancel_running_job(tmp_path, monkeypatch):
     assert response.json()["followup_url"] == "https://github.com/gisce/erp/issues/1#issuecomment-2"
     stored = q.get(job.id)
     assert stored is not None
-    assert stored.status == "blocked"
+    assert stored.status == "done"
     assert stored.metadata["cancellation"]["actor"] == "ecarreras"
     assert stored.metadata["cancellation"]["reason"] == "obsolete"
 
