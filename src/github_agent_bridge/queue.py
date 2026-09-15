@@ -164,6 +164,51 @@ class JobQueue:
                 row = con.execute("SELECT * FROM jobs WHERE message_id=?", (n.message_id,)).fetchone()
                 return self._row_to_job(row) if row else None, "duplicate"
 
+    def quarantine_notification(
+        self,
+        n: Notification,
+        *,
+        reason: str,
+        error: str,
+        metadata: dict[str, object] | None = None,
+        body_excerpt_chars: int = 2000,
+    ) -> int:
+        body_excerpt = n.body[:body_excerpt_chars]
+        now = utc_now()
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True)
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                con.execute(
+                    """
+                    INSERT INTO quarantined_notifications(
+                        uid,message_id,subject,from_addr,reason,error,body_excerpt,metadata_json,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?)
+                    """,
+                    (n.uid, n.message_id, n.subject, n.from_addr, reason, error[:1000], body_excerpt, metadata_json, now),
+                )
+                quarantine_id = int(con.execute("SELECT last_insert_rowid()").fetchone()[0])
+                self._log(
+                    con,
+                    None,
+                    None,
+                    "quarantined",
+                    f"GitHub notification quarantined: {reason}",
+                    n.message_id or error[:500],
+                )
+                con.commit()
+                return quarantine_id
+            except sqlite3.IntegrityError:
+                con.rollback()
+                if n.message_id:
+                    row = con.execute(
+                        "SELECT id FROM quarantined_notifications WHERE message_id=?",
+                        (n.message_id,),
+                    ).fetchone()
+                    if row:
+                        return int(row["id"])
+                raise
+
     def claim_next(self, worker_id: str, work_intents: frozenset[str] | set[str] | None = None) -> Job | None:
         now = utc_now()
         with self.connect() as con:
@@ -636,11 +681,17 @@ class JobQueue:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _ensure_indexes(self, con: sqlite3.Connection) -> None:
-        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_tokens'").fetchone() is None:
-            return
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user ON mcp_tokens(user_login, revoked_at, created_at)"
-        )
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_tokens'").fetchone() is not None:
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user ON mcp_tokens(user_login, revoked_at, created_at)"
+            )
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='quarantined_notifications'").fetchone() is not None:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantined_notifications_message_id ON quarantined_notifications(message_id) WHERE message_id IS NOT NULL AND message_id != ''"
+            )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_quarantined_notifications_unresolved ON quarantined_notifications(resolved_at, created_at)"
+            )
 
     def _row_to_job(self, row: sqlite3.Row | None) -> Job | None:
         if row is None:

@@ -28,6 +28,7 @@ ALERT_READER_TIMER = "monitor.reader_timer"
 ALERT_READER_LAST_RESULT = "monitor.reader_last_result"
 ALERT_READER_STALE = "monitor.reader_stale"
 ALERT_RUNNING_JOB_STALLED = "monitor.running_job_stalled"
+ALERT_QUARANTINED_NOTIFICATIONS = "monitor.quarantined_notifications"
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class MonitorReport:
             f"pending={metrics.get('pending', 0)}",
             f"blocked={metrics.get('blocked', 0)}",
             f"running={metrics.get('running', 0)}",
+            f"quarantined={metrics.get('quarantined_notifications', 0)}",
             f"oldest_pending={metrics.get('oldest_pending_age_seconds') if metrics.get('oldest_pending_age_seconds') is not None else '-'}",
             f"last_uid={metrics.get('last_uid', '-')}",
         ]
@@ -258,9 +260,14 @@ def monitor(
     pending = int(metrics.get("pending", 0) or 0)
     blocked = int(metrics.get("blocked", 0) or 0)
     waiting = int(metrics.get("waiting_approval", 0) or 0)
+    quarantined = int(metrics.get("quarantined_notifications", 0) or 0)
     pending_age = metrics.get("oldest_pending_age_seconds")
     if blocked:
         _add_alert(metrics, alerts, ALERT_BLOCKED_JOBS, f"blocked jobs: {blocked}")
+    if quarantined:
+        latest = metrics.get("latest_quarantined_notification") or {}
+        detail = f"; latest uid={latest.get('uid')} reason={latest.get('reason')}" if latest else ""
+        _add_alert(metrics, alerts, ALERT_QUARANTINED_NOTIFICATIONS, f"quarantined GitHub notifications: {quarantined}{detail}")
     if pending and pending_age is not None and pending_age > thresholds.pending_warn_seconds:
         _add_alert(
             metrics,

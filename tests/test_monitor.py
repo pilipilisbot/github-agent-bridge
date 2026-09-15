@@ -101,6 +101,24 @@ def test_monitor_alerts_on_blocked_job(tmp_path):
     assert any("blocked jobs: 1" in a for a in report.alerts)
 
 
+def test_monitor_alerts_on_quarantined_notifications(tmp_path):
+    db = tmp_path / "bridge.sqlite3"
+    q = JobQueue(db)
+    q.quarantine_notification(
+        notif(uid=9, mid="<poison@github.com>", body="bad"),
+        reason="ingestion_error",
+        error="ValueError: missing GitHub context",
+    )
+
+    report = monitor(db, check_systemd=False)
+
+    assert report.ok is False
+    assert report.metrics["quarantined_notifications"] == 1
+    assert report.metrics["latest_quarantined_notification"]["uid"] == 9
+    assert "monitor.quarantined_notifications" in report.metrics["alert_codes"]
+    assert any("quarantined GitHub notifications: 1" in a for a in report.alerts)
+
+
 def test_monitor_alerts_on_old_pending_job(tmp_path):
     db = tmp_path / "bridge.sqlite3"
     q = JobQueue(db)

@@ -52,6 +52,32 @@ def test_connect_recreates_missing_parent_directory(tmp_path):
         ).fetchone()[0] == 1
 
 
+def test_init_adds_quarantine_schema_to_existing_database(tmp_path):
+    db = tmp_path / "q.sqlite3"
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+
+    JobQueue(db)
+
+    with sqlite3.connect(db) as con:
+        tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        indexes = {
+            row[0]
+            for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+
+    assert "quarantined_notifications" in tables
+    assert "idx_quarantined_notifications_message_id" in indexes
+    assert "idx_quarantined_notifications_unresolved" in indexes
+
+
 def test_queue_expands_user_in_db_path(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))

@@ -214,6 +214,22 @@ def inspect_db_read_only(db: str | Path) -> dict[str, Any]:
                 "rejected": knowledge_counts.get("rejected", 0),
                 "errors": knowledge_counts.get("error", 0),
             }
+        if table_exists(con, "quarantined_notifications"):
+            unresolved_quarantines = con.execute(
+                "SELECT count(*) count FROM quarantined_notifications WHERE resolved_at IS NULL"
+            ).fetchone()["count"]
+            out["quarantined_notifications"] = int(unresolved_quarantines)
+            latest_quarantine = con.execute(
+                """
+                SELECT id, uid, message_id, subject, reason, error, created_at
+                FROM quarantined_notifications
+                WHERE resolved_at IS NULL
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if latest_quarantine:
+                out["latest_quarantined_notification"] = dict(latest_quarantine)
         if table_exists(con, "worklog"):
             last_log = con.execute("SELECT ts, phase, summary FROM worklog ORDER BY id DESC LIMIT 1").fetchone()
             if last_log:

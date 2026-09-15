@@ -37,6 +37,21 @@ CREATE TABLE IF NOT EXISTS coalesced_notifications (
   context_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS quarantined_notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid INTEGER,
+  message_id TEXT,
+  subject TEXT NOT NULL,
+  from_addr TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  error TEXT NOT NULL,
+  body_excerpt TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantined_notifications_message_id ON quarantined_notifications(message_id) WHERE message_id IS NOT NULL AND message_id != '';
+CREATE INDEX IF NOT EXISTS idx_quarantined_notifications_unresolved ON quarantined_notifications(resolved_at, created_at);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS worklog (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
